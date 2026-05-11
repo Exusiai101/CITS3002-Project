@@ -288,6 +288,9 @@ class NetworkLayer:
         print(f"{self.node_name}: Layer 3: Segment received from Transport Layer: "
               f"SRC_IP={src_ip}, DST_IP={dest_ip}, TTL={self.DEFAULT_TTL}")
         # TODO: create_packet, routing_table_lookup, send_down_to_data_link_layer
+        new_packet = self.create_packet(src_ip, dest_ip, segment)
+        table = self.routing_table_lookup(dest_ip)
+        self.send_down_to_data_link_layer(new_packet, table["interface"], table["next_hop"])
         pass
 
     def create_packet(self, src_ip: str, dest_ip: str, segment: Segment,
@@ -304,7 +307,7 @@ class NetworkLayer:
             A new Packet object
         """
         # TODO: return Packet(src_ip, dest_ip, ttl or self.DEFAULT_TTL, segment)
-        pass
+        return Packet(src_ip, dest_ip, ttl or self.DEFAULT_TTL, segment)
 
     def routing_table_lookup(self, dest_ip: str) -> dict:
         """Find the best route for dest_ip in self.routing_table.
@@ -324,6 +327,10 @@ class NetworkLayer:
         """
         print(f"{self.node_name}: Layer 3: Routing table lookup performed")
         # TODO: iterate routing_table, match dest_ip against each network prefix
+        for network in list(self.routing_table):
+            if dest_ip in network["network"]:
+                return network
+        raise ValueError(f"No matching route found for {dest_ip}")
         pass
 
     def send_down_to_data_link_layer(self, packet: Packet,
@@ -338,6 +345,7 @@ class NetworkLayer:
         print(f"{self.node_name}: Layer 3: Packet forwarded to Data Link Layer")
         # TODO: self.data_link_layers[interface].receive_packet_from_network_layer(
         #           packet, next_hop_ip)
+        self.data_link_layers[interface].receive_packet_from_network_layer(packet, next_hop_ip)
         pass
 
     # ------------------------------------------------------------------
@@ -356,6 +364,11 @@ class NetworkLayer:
         print(f"{self.node_name}: Layer 3: Packet received from Data Link Layer: "
               f"SRC_IP={packet.src_ip}, DST_IP={packet.dest_ip}, TTL={packet.ttl}")
         # TODO: check dest_ip, TTL decrement, route or deliver
+        if self.is_local_delivery(packet.src_ip):
+            pass  # TODO: perform Local delivery
+        else:
+            packet.ttl -= 1
+            self.forward_packet(packet)
         pass
 
     def forward_packet(self, packet: Packet):
@@ -370,6 +383,13 @@ class NetworkLayer:
             packet – the IP packet to forward
         """
         # TODO: TTL check, routing_table_lookup, send_down_to_data_link_layer
+        if packet.ttl == 0:
+            # TODO: drop packet
+            return
+        else:
+            table = self.routing_table_lookup(packet.dest_ip)
+            if table:
+                self.send_down_to_data_link_layer(packet, table["interface"], table["next_hop"])
         pass
 
     def is_local_delivery(self, dest_ip: str) -> bool:
@@ -382,7 +402,10 @@ class NetworkLayer:
             bool
         """
         # TODO: return dest_ip in self.ip_addresses
-        pass
+        for ip in self.ip_addresses:
+            if ip == dest_ip:
+                return True
+        return False
 
     def send_up_to_transport_layer(self, segment: Segment):
         """Deliver the decapsulated Segment to the Transport Layer.
@@ -391,8 +414,7 @@ class NetworkLayer:
             segment – the transport segment extracted from the packet payload
         """
         print(f"{self.node_name}: Layer 3: Segment delivered to Transport Layer")
-        # TODO: self.transport_layer.receive_segment_from_network_layer(segment)
-        pass
+        self.transport_layer.receive_segment_from_network_layer(segment)
 
 
 # ---------------------------------------------------------------------------
