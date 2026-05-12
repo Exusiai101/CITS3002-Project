@@ -126,17 +126,25 @@ class DataLinkLayer:
         network_layer – reference to the NetworkLayer above (set after init)
     """
 
-    def __init__(self, node_name: str, mac_address: str):
+    def __init__(self, node_name: str, mac_address: str, mac_table: dict[str, str], network_neighbour: dict[str, tuple["DataLinkLayer", str]] ):
         self.node_name     = node_name
         self.mac_address   = mac_address
-        self.mac_table: dict[str, str] = {}  # ip → mac
+        
+        # from the config, it allow relation betwen ip and mac to be created
+        self.mac_table = mac_table 
+        
+        self.interface_table  = {}
+        
         self.network_layer = None            # injected after construction
-
+        
+        # pass in when creating object, provide a view of connected node, linking ip and its corresponding object  
+        self.network_neighbour = network_neighbour
     # ------------------------------------------------------------------
     # Sending path (downward from Network Layer)
     # ------------------------------------------------------------------
 
-    def receive_packet_from_network_layer(self, packet: Packet, next_hop_ip: str):
+    # call this 
+    def receive_packet_from_network_layer(self, packet: Packet, next_hop_ip: str, outgoing_interface: str):
         """Accept a Packet from the Network Layer and transmit it as a Frame.
 
         Steps:
@@ -148,8 +156,25 @@ class DataLinkLayer:
             packet      – the IP packet to encapsulate
             next_hop_ip – next-hop IP address to resolve to a MAC
         """
+        # this function will be call to passing in data
+        # all we care at L2 is how to pass data from host to router
+
         print(f"{self.node_name}: Layer 2: Packet received from Network Layer")
         # TODO: call mac_lookup, create_frame, send_frame
+        
+        # using the next hop ip from L3 find its mac address, as L2 use mac address
+        dest_mac = self.mac_lookup(next_hop_ip)
+
+        # create a frame data structue, where the dest mac is router, 
+        # sending from current node so itself (node) mac address, 
+        # the packet itself will be pass it as payload
+        frame = self.create_frame(dest_mac, self.mac_address, packet)
+
+        # find which object is going to transmiss to within the same network using the hardcoded interface 
+        destination, interface = self.network_neighbour[outgoing_interface]
+
+        # send to the router by call the router's L2 function
+        self.send_frame(frame, destination, interface)
         pass
 
     def mac_lookup(self, next_hop_ip: str) -> str:
@@ -164,6 +189,8 @@ class DataLinkLayer:
             MAC address string
         """
         # TODO: return self.mac_table[next_hop_ip]
+        # return the result after using next hop ip to find it mac address
+        return self.mac_table[next_hop_ip]
         pass
 
     def create_frame(self, dest_mac: str, src_mac: str, packet: Packet) -> Frame:
@@ -178,9 +205,11 @@ class DataLinkLayer:
             A new Frame object
         """
         # TODO: return Frame(dest_mac, src_mac, packet)
+        # return the create Frame data strcture
+        return Frame(dest_mac, src_mac, packet)
         pass
 
-    def send_frame(self, frame: Frame, destination):
+    def send_frame(self, frame: Frame, destination : object, interface: str):
         """Transmit a Frame to the next node's DataLinkLayer.
 
         In this simulation 'sending' means calling destination.receive_frame().
@@ -191,12 +220,15 @@ class DataLinkLayer:
         """
         print(f"{self.node_name}: Layer 2: Frame sent")
         # TODO: destination.receive_frame(frame)
+        # by passing in the dest (router) object, making the dest (router) object to call received, making passing possible
+        destination.receive_frame(frame, interface)
         pass
 
     # ------------------------------------------------------------------
     # Receiving path (upward from the link / toward Network Layer)
     # ------------------------------------------------------------------
-
+    
+    # call this one
     def receive_frame(self, frame: Frame, interface: str = ""):
         """Process an incoming Frame.
 
@@ -212,6 +244,17 @@ class DataLinkLayer:
         print(f"{self.node_name}: Layer 2: Frame received"
               + (f" on {interface}" if interface else ""))
         # TODO: mac_learning, forward_or_deliver decision, send_up_to_network_layer
+        
+        # check the dest mac is matching node's mac address
+        if frame.dest_mac != self.mac_address:
+            print('wrong mac address')
+            return 
+        
+        # building the relation between src mac and the interface
+        self.mac_learning(frame.src_mac, interface)
+        
+        # passing the frame payload up
+        self.send_up_to_network_layer(frame.payload)
         pass
 
     def mac_learning(self, src_mac: str, interface: str = ""):
@@ -223,7 +266,10 @@ class DataLinkLayer:
         """
         print(f"{self.node_name}: Layer 2: Source MAC learned: {src_mac}"
               + (f" on {interface}" if interface else ""))
-        # TODO: self.mac_table[src_mac] = interface  (or however you want to store it)
+        # TODO: self.interface_table[src_mac] = interface  (or however you want to store it)
+        
+        # learning and mapping the relationship between src ac address and the interface
+        self.interface_table[src_mac] = interface
         pass
 
     def send_up_to_network_layer(self, packet: Packet):
@@ -234,6 +280,9 @@ class DataLinkLayer:
         """
         print(f"{self.node_name}: Layer 2: Packet delivered to Network Layer")
         # TODO: self.network_layer.receive_packet_from_data_link_layer(packet)
+
+        # by passing the payload from the frame, passing the informatin up to L3
+        self.network_layer.receive_packet_from_data_link_layer(packet)
         pass
 
 

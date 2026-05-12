@@ -11,7 +11,7 @@ host_a = {
         }
     },
 
-    "mac_table":{"10.0.1.1": "BB:BB:BB:BB:BB:BB"}
+    "mac_table":{"10.0.1.1": "BB:BB:BB:BB:BB:BB"} # find the mac address of next hop, using its ip address
 }
 
 # host B
@@ -27,7 +27,7 @@ host_b = {
         }
     },
 
-    "mac_table":{"10.0.2.1": "CC:CC:CC:CC:CC:CC"}
+    "mac_table":{"10.0.2.1": "CC:CC:CC:CC:CC:CC"} # find the mac address of next hop, using its ip address
 }
 
 
@@ -57,7 +57,7 @@ router_R1 = {
             "mac": "CC:CC:CC:CC:CC:CC"
         }
     },
-
+    # find the mac address of next hop, using its ip address
     "mac_table" : {
         "10.0.1.10": "AA:AA:AA:AA:AA:AA",
         "10.0.2.20": "DD:DD:DD:DD:DD:DD"
