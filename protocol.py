@@ -374,12 +374,41 @@ class NetworkLayer:
         Raises:
             ValueError if no matching route is found.
         """
+
+        def _ip_to_int(ip: str) -> int:
+            parts = ip.split('.')
+            result = 0
+            for part in parts:
+                result = (result << 8) | int(part)
+            return result
+
         print(f"{self.node_name}: Layer 3: Routing table lookup performed")
         # TODO: iterate routing_table, match dest_ip against each network prefix
-        for network in list(self.routing_table):
-            if dest_ip in network["network"]:
-                return network
-        raise ValueError(f"No matching route found for {dest_ip}")
+        dest_int = _ip_to_int(dest_ip)
+        best_match = None
+        best_prefix_len = -1
+
+        for route in self.routing_table:
+            network_ip, prefix_len = route["network"].split('/')
+            prefix_len = int(prefix_len)
+
+            # build mask from prefix length, e.g. /24 -> 0xFFFFFF00
+            if prefix_len == 0:
+                mask = 0
+            else:
+                mask = ((1 << 32) - 1) ^ ((1 << (32 - prefix_len)) - 1)
+
+            network_int = _ip_to_int(network_ip)
+
+            if dest_int & mask == network_int:
+                if prefix_len > best_prefix_len:
+                    best_prefix_len = prefix_len
+                    best_match = route
+
+        if best_match is None:
+            raise ValueError(f"No matching route found for {dest_ip}")
+
+        return best_match
         pass
 
     def send_down_to_data_link_layer(self, packet: Packet,
@@ -413,8 +442,9 @@ class NetworkLayer:
         print(f"{self.node_name}: Layer 3: Packet received from Data Link Layer: "
               f"SRC_IP={packet.src_ip}, DST_IP={packet.dest_ip}, TTL={packet.ttl}")
         # TODO: check dest_ip, TTL decrement, route or deliver
-        if self.is_local_delivery(packet.src_ip):
-            pass  # TODO: perform Local delivery
+        if self.is_local_delivery(packet.dest_ip):
+            # TODO: perform Local delivery
+            self.send_up_to_transport_layer(packet.get_payload())
         else:
             packet.ttl -= 1
             self.forward_packet(packet)
@@ -432,7 +462,7 @@ class NetworkLayer:
             packet – the IP packet to forward
         """
         # TODO: TTL check, routing_table_lookup, send_down_to_data_link_layer
-        if packet.ttl == 0:
+        if packet.ttl <= 0:
             # TODO: drop packet
             return
         else:

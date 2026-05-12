@@ -160,7 +160,11 @@ class TestSegment(unittest.TestCase):
 
 class TestDataLinkLayer(unittest.TestCase):
     def setUp(self):
-        self.dl = DataLinkLayer("Host A", "AA:AA:AA:AA:AA:AA")
+        self.dl = DataLinkLayer(
+            "Host A", "AA:AA:AA:AA:AA:AA",
+            mac_table={},
+            network_neighbour={},
+        )
 
     def test_init_fields(self):
         self.assertEqual(self.dl.node_name, "Host A")
@@ -190,12 +194,12 @@ class TestDataLinkLayer(unittest.TestCase):
     def test_send_frame_calls_receive_on_destination(self):
         dest = MagicMock()
         frame = Frame("BB:BB:BB:BB:BB:BB", "AA:AA:AA:AA:AA:AA", make_packet())
-        self.dl.send_frame(frame, dest)
-        dest.receive_frame.assert_called_once_with(frame)
+        self.dl.send_frame(frame, dest, "eth0")
+        dest.receive_frame.assert_called_once_with(frame, "eth0")
 
-    def test_mac_learning_stores_mac_in_table(self):
+    def test_mac_learning_stores_mac_in_interface_table(self):
         self.dl.mac_learning("AA:AA:AA:AA:AA:AA", interface="eth0")
-        self.assertEqual(self.dl.mac_table["AA:AA:AA:AA:AA:AA"], "eth0")
+        self.assertEqual(self.dl.interface_table["AA:AA:AA:AA:AA:AA"], "eth0")
 
     def test_send_up_to_network_layer_passes_packet_up(self):
         self.dl.network_layer = MagicMock()
