@@ -136,7 +136,7 @@ class DataLinkLayer:
         
         self.interface_table  = {}
         
-        self.network_layer = None            # injected after construction
+        self.network_layer : NetworkLayer | None = None  # injected after construction
         
         # pass in when creating object, provide a view of connected node, linking ip and its corresponding object  
         self.network_neighbour = network_neighbour
@@ -315,7 +315,7 @@ class NetworkLayer:
         self.ip_addresses    = ip_addresses
         self.routing_table   = routing_table
         self.data_link_layers: dict[str, DataLinkLayer] = {}
-        self.transport_layer = None  # injected after construction
+        self.transport_layer : TransportLayer | None = None  # injected after construction
 
     # ------------------------------------------------------------------
     # Sending path (downward from Transport Layer)
@@ -535,7 +535,7 @@ class TransportLayer:
         self.sequence_number = 0   # alternating bit between 0 and 1
         self.last_ack_sent = 0  # last ACK seq sent by receiver, init with 0
         self.expected_sequence_number = 0 
-        self.network_layer = None  # injected after construction
+        self.network_layer : NetworkLayer | None = None  # injected after construction
 
     
     # ------------------------------------------------------------------
