@@ -91,14 +91,15 @@ class Segment:
 
     HEADER_SIZE = 10  # fixed header overhead: src_port+dest_port+len+cksum+type+seq
 
-    def __init__(self, src_port: int, dest_port: int, seg_type: int,
-                 sequence_number: int, data: str = "", checksum: int = 0):
+    def __init__(self, src_port: int, dest_port: int, fragment_flag: int,
+                 seg_type: int, sequence_number: int, data: str = "", checksum: int = 0):
         self.src_port        = src_port
         self.dest_port       = dest_port
-        self.type            = seg_type
-        self.sequence_number = sequence_number
+        self.type            = seg_type # 0 -> data; 1 -> ack
+        self.sequence_number = sequence_number # alternating between 0 and 1
         self.data            = data
-        self.length          = self.HEADER_SIZE + len(data)
+        self.fragment_flag   = fragment_flag # fragementation flag indicate same fragement or not
+        self.length          = self.HEADER_SIZE + data
         self.checksum        = checksum  # filled in by TransportLayer.compute_checksum
 
     def get_data(self):
@@ -528,30 +529,20 @@ class TransportLayer:
         self.dest_port     = dest_port
         self.src_ip        = src_ip
         self.dest_ip       = dest_ip
-        self.seq_num       = 0   # alternating bit for sender
-        self.last_ack_sent = -1  # last ACK seq sent by receiver (−1 = none yet)
+        self.remaining_data = None
+        self.backup_sent_data_segment = None
+        self.segment_type  = 0 
+        self.sequence_number = 0   # alternating bit between 0 and 1
+        self.last_ack_sent = 0  # last ACK seq sent by receiver, init with 0
+        self.expected_sequence_number = 0 
         self.network_layer = None  # injected after construction
 
+    
     # ------------------------------------------------------------------
     # Sending path (downward from Application Layer)
     # ------------------------------------------------------------------
 
-    def send_data(self, data: str):
-        """Segment application data and reliably send each segment via rdt2.2.
-
-        If len(data) > MAX_DATA_SIZE the message is split into chunks of at
-        most MAX_DATA_SIZE bytes.  Each chunk is sent sequentially; the next
-        chunk is only sent after the current ACK is received.
-
-        Args:
-            data – the full application message string
-        """
-        print(f"{self.node_name}: Layer 4: Data received from Application Layer. "
-              f"Data size={len(data)}")
-        # TODO: split data into chunks <= MAX_DATA_SIZE, call _send_segment for each
-        pass
-
-    def _send_segment(self, data_chunk: str):
+    def send_data_segment(self, application_data: str):
         """Reliably send one data chunk using rdt2.2.
 
         Creates a DATA segment, computes its checksum, sends it down, then
@@ -567,9 +558,40 @@ class TransportLayer:
         #   4. wait for ACK (in simulation: call network path synchronously)
         #   5. if correct ACK: advance seq_num (0→1 or 1→0)
         #      else: retransmit
+        application_data = int(application_data)
+        
+       
+        fragment_flag, data, self.remaining_data = self.fragmentation(application_data)
+            
+        checksum = self.compute_checksum(data)
+        segment_created = self.create_segment(SEG_DATA, self.sequence_number, fragment_flag, checksum, data)
+        self.backup_sent_data_segment = segment_created
+        self.send_segment_to_network_layer(segment_created)
         pass
 
-    def compute_checksum(self, data: str) -> int:
+    def fragmentation(self, data: int):
+        """Segment application data and reliably send each segment via rdt2.2.
+
+        If len(data) > MAX_DATA_SIZE the message is split into chunks of at
+        most MAX_DATA_SIZE bytes.  Each chunk is sent sequentially; the next
+        chunk is only sent after the current ACK is received.
+
+        Args:
+            data – the full application message string
+        """
+        print(f"{self.node_name}: Layer 4: Data received from Application Layer. "
+              f"Data size={data}")
+        # TODO: split data into chunks <= MAX_DATA_SIZE, call _send_segment for each
+        is_fragment = 1
+        is_not_fragment = 0
+        if data > MAX_DATA_SIZE:
+            remaining = data - MAX_DATA_SIZE
+            return is_fragment, int(MAX_DATA_SIZE), remaining
+        else:
+            return is_not_fragment, data, None
+        pass
+
+    def compute_checksum(self, data: int) -> int:
         """Compute a simple checksum over the segment data.
 
         Implementation suggestion: sum of ASCII values modulo 65536.
@@ -582,23 +604,11 @@ class TransportLayer:
         """
         print(f"{self.node_name}: Layer 4: Checksum computed")
         # TODO: return sum(ord(c) for c in data) % 65536
+        return (31 * data) % 65536
         pass
 
-    def verify_checksum(self, segment: Segment) -> bool:
-        """Verify the checksum of a received segment.
-
-        Args:
-            segment – the segment to verify
-
-        Returns:
-            True if checksum is valid, False otherwise
-        """
-        print(f"{self.node_name}: Layer 4: Checksum verified")
-        # TODO: recompute and compare with segment.checksum
-        pass
-
-    def create_segment(self, seg_type: int, seq_num: int,
-                       data: str = "", checksum: int = 0) -> Segment:
+    def create_segment(self, segment_type :int, sequence_number: int, fragment_flag: int, 
+                       checksum: int, data: int = 0) -> Segment:
         """Build a Segment with the given parameters.
 
         Args:
@@ -612,6 +622,8 @@ class TransportLayer:
         """
         # TODO: return Segment(self.src_port, self.dest_port, seg_type, seq_num,
         #                       data, checksum)
+
+        return Segment(self.src_port, self.dest_port, segment_type, sequence_number, fragment_flag, data, checksum)
         pass
 
     def send_segment_to_network_layer(self, segment: Segment):
@@ -623,7 +635,13 @@ class TransportLayer:
         print(f"{self.node_name}: Layer 4: Segment sent to Network Layer")
         # TODO: self.network_layer.receive_segment_from_transport_layer(
         #           segment, self.src_ip, self.dest_ip)
-        pass
+        self.network_layer.receive_segment_from_transport_layer(segment, self.src_ip, self.dest_ip)
+        
+        # # updating sequence number
+        # self.sequence_number = self.sequence_number + 1
+        # if self.sequence_number > 1:
+        #     self.sequence_number = 0
+        # pass
 
     # ------------------------------------------------------------------
     # Receiving path (upward from Network Layer)
@@ -647,25 +665,96 @@ class TransportLayer:
         """
         print(f"{self.node_name}: Layer 4: Segment received from Network Layer")
         # TODO: branch on segment.type (SEG_DATA vs SEG_ACK)
+        # work depending on segmnet.type
+
+        # received data
+        if segment.type == SEG_DATA:
+            if self.verify_checksum(segment):
+                # expecting same sequence number first
+                if self.expected_sequence_number == segment.sequence_number:
+                    self.deliver_to_application(segment.data)
+                    self._send_ack_segment(self.expected_sequence_number)
+
+                    # updateing the expect sequence number
+                    self.expected_sequence_number = self.expected_sequence_number + 1
+                    if self.expected_sequence_number > 1:
+                        self.expected_sequence_number = 0
+                # duplicate handling 
+                else:
+                    self._send_ack_segment(self.last_ack_sent)       
+            # checksum incorrect, request retransmission
+            else:
+                self._send_ack_segment(self.last_ack_sent)
+
+
+
+        # received ack
+        else: # segment.type == SEG_ACK
+            if self.verify_checksum(segment):
+                # expecting same sequence number first
+                if self.sequence_number == segment.sequence_number:
+                    print(f"ACK received: seq={self.sequence_number}")
+
+                    # updateing the expect sequence number
+                    self.sequence_number = self.sequence_number + 1
+                    if self.sequence_number > 1:
+                        self.sequence_number = 0
+                    
+                    # send next segment if fragmentation still have reminding data
+                    if self.remaining_data is not None: 
+                        # data transmission
+                        self.send_data_segment(self.remaining_data)
+                    # if no reminding data do nothing
+                else:
+                    # if different, must be the last sent segment need to resend
+                    self.send_segment_to_network_layer(self.backup_sent_data_segment)
+            else:
+                # checksum incorrect, request retransmission
+                self.send_segment_to_network_layer(self.backup_sent_data_segment)
+
         pass
 
-    def _send_ack(self, seq_num: int):
+    def verify_checksum(self, segment: Segment) -> bool:
+        """Verify the checksum of a received segment.
+
+        Args:
+            segment – the segment to verify
+
+        Returns:
+            True if checksum is valid, False otherwise
+        """
+        print(f"{self.node_name}: Layer 4: Checksum verified")
+        # TODO: recompute and compare with segment.checksum
+        if segment.checksum == self.compute_checksum(segment.data):
+            return True
+        return False
+        pass
+
+    def _send_ack_segment(self, sequence_number: int):
         """Create and send an ACK segment for the given sequence number.
 
         Args:
             seq_num – sequence number to acknowledge
         """
-        print(f"{self.node_name}: Layer 4: ACK sent: seq={seq_num}")
+        print(f"{self.node_name}: Layer 4: ACK sent: seq={sequence_number}")
         # TODO: create_segment(SEG_ACK, seq_num), send_segment_to_network_layer
+        fragment_flag = 0
+        checksum = self.compute_checksum(0)
+        data = 0
+        segment_type = SEG_ACK
+        segment = self.create_segment(segment_type, sequence_number, fragment_flag, checksum, data)
+        self.send_segment_to_network_layer(segment)
+        # update the last ack value
+        self.last_ack_sent = segment.sequence_number
         pass
 
-    def deliver_to_application(self, data: str):
+    def deliver_to_application(self, data: int):
         """Deliver received data to the application layer (print / return).
 
         Args:
             data – the application message payload
         """
         print(f"{self.node_name}: Layer 4: DATA segment delivered to Application Layer. "
-              f"Data size={len(data)}")
+              f"Data size={data}")
         # TODO: in this simulation, printing suffices; extend if needed
         pass
