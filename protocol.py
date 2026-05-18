@@ -62,7 +62,7 @@ class Packet:
         self.ttl          = ttl
         self.protocol     = protocol
         self.payload      = payload  # Segment
-        self.total_length = self.HEADER_SIZE + (len(payload.data) if payload.data else 0)
+        self.total_length = self.HEADER_SIZE + payload.data
 
     def get_payload(self):
         return self.payload
@@ -86,13 +86,14 @@ class Segment:
         checksum        – computed checksum for error detection (2 bytes)
         type            – SEG_DATA (0) or SEG_ACK (1)
         sequence_number – alternating bit: 0 or 1
-        data            – application payload bytes (empty string/bytes for ACK)
+        data            – payload size in bytes (0 for ACK)
     """
 
     HEADER_SIZE = 10  # fixed header overhead: src_port+dest_port+len+cksum+type+seq
 
     def __init__(self, src_port: int, dest_port: int, fragment_flag: int,
-                 seg_type: int, sequence_number: int, data: str = "", checksum: int = 0):
+                 seg_type: int, sequence_number: int,
+                 data: int = 0, checksum: int = 0):
         self.src_port        = src_port
         self.dest_port       = dest_port
         self.type            = seg_type # 0 -> data; 1 -> ack
@@ -161,8 +162,7 @@ class DataLinkLayer:
         # all we care at L2 is how to pass data from host to router
 
         print(f"{self.node_name}: Layer 2: Packet received from Network Layer")
-        # TODO: call mac_lookup, create_frame, send_frame
-        
+
         # using the next hop ip from L3 find its mac address, as L2 use mac address
         dest_mac = self.mac_lookup(next_hop_ip)
 
@@ -189,7 +189,6 @@ class DataLinkLayer:
         Returns:
             MAC address string
         """
-        # TODO: return self.mac_table[next_hop_ip]
         # return the result after using next hop ip to find it mac address
         return self.mac_table[next_hop_ip]
         pass
@@ -205,7 +204,6 @@ class DataLinkLayer:
         Returns:
             A new Frame object
         """
-        # TODO: return Frame(dest_mac, src_mac, packet)
         # return the create Frame data strcture
         return Frame(dest_mac, src_mac, packet)
         pass
@@ -220,7 +218,6 @@ class DataLinkLayer:
             destination – the receiving DataLinkLayer instance
         """
         print(f"{self.node_name}: Layer 2: Frame sent")
-        # TODO: destination.receive_frame(frame)
         # by passing in the dest (router) object, making the dest (router) object to call received, making passing possible
         destination.receive_frame(frame, interface)
         pass
@@ -244,8 +241,7 @@ class DataLinkLayer:
         """
         print(f"{self.node_name}: Layer 2: Frame received"
               + (f" on {interface}" if interface else ""))
-        # TODO: mac_learning, forward_or_deliver decision, send_up_to_network_layer
-        
+
         # check the dest mac is matching node's mac address
         if frame.dest_mac != self.mac_address:
             print('wrong mac address')
@@ -267,8 +263,7 @@ class DataLinkLayer:
         """
         print(f"{self.node_name}: Layer 2: Source MAC learned: {src_mac}"
               + (f" on {interface}" if interface else ""))
-        # TODO: self.interface_table[src_mac] = interface  (or however you want to store it)
-        
+
         # learning and mapping the relationship between src ac address and the interface
         self.interface_table[src_mac] = interface
         pass
@@ -280,7 +275,6 @@ class DataLinkLayer:
             packet – the IP packet extracted from the frame payload
         """
         print(f"{self.node_name}: Layer 2: Packet delivered to Network Layer")
-        # TODO: self.network_layer.receive_packet_from_data_link_layer(packet)
 
         # by passing the payload from the frame, passing the informatin up to L3
         self.network_layer.receive_packet_from_data_link_layer(packet)
@@ -337,7 +331,6 @@ class NetworkLayer:
         """
         print(f"{self.node_name}: Layer 3: Segment received from Transport Layer: "
               f"SRC_IP={src_ip}, DST_IP={dest_ip}, TTL={self.DEFAULT_TTL}")
-        # TODO: create_packet, routing_table_lookup, send_down_to_data_link_layer
         new_packet = self.create_packet(src_ip, dest_ip, segment)
         table = self.routing_table_lookup(dest_ip)
         self.send_down_to_data_link_layer(new_packet, table["interface"], table["next_hop"])
@@ -356,7 +349,6 @@ class NetworkLayer:
         Returns:
             A new Packet object
         """
-        # TODO: return Packet(src_ip, dest_ip, ttl or self.DEFAULT_TTL, segment)
         return Packet(src_ip, dest_ip, ttl or self.DEFAULT_TTL, segment)
 
     def routing_table_lookup(self, dest_ip: str) -> dict:
@@ -384,7 +376,6 @@ class NetworkLayer:
             return result
 
         print(f"{self.node_name}: Layer 3: Routing table lookup performed")
-        # TODO: iterate routing_table, match dest_ip against each network prefix
         dest_int = _ip_to_int(dest_ip)
         best_match = None
         best_prefix_len = -1
@@ -422,9 +413,7 @@ class NetworkLayer:
             next_hop_ip – next-hop IP address for MAC resolution
         """
         print(f"{self.node_name}: Layer 3: Packet forwarded to Data Link Layer")
-        # TODO: self.data_link_layers[interface].receive_packet_from_network_layer(
-        #           packet, next_hop_ip)
-        self.data_link_layers[interface].receive_packet_from_network_layer(packet, next_hop_ip)
+        self.data_link_layers[interface].receive_packet_from_network_layer(packet, next_hop_ip, interface)
         pass
 
     # ------------------------------------------------------------------
@@ -442,9 +431,7 @@ class NetworkLayer:
         """
         print(f"{self.node_name}: Layer 3: Packet received from Data Link Layer: "
               f"SRC_IP={packet.src_ip}, DST_IP={packet.dest_ip}, TTL={packet.ttl}")
-        # TODO: check dest_ip, TTL decrement, route or deliver
         if self.is_local_delivery(packet.dest_ip):
-            # TODO: perform Local delivery
             self.send_up_to_transport_layer(packet.get_payload())
         else:
             packet.ttl -= 1
@@ -462,14 +449,11 @@ class NetworkLayer:
         Args:
             packet – the IP packet to forward
         """
-        # TODO: TTL check, routing_table_lookup, send_down_to_data_link_layer
         if packet.ttl <= 0:
-            # TODO: drop packet
             return
-        else:
-            table = self.routing_table_lookup(packet.dest_ip)
-            if table:
-                self.send_down_to_data_link_layer(packet, table["interface"], table["next_hop"])
+        table = self.routing_table_lookup(packet.dest_ip)
+        next_hop = table["next_hop"] if table["next_hop"] is not None else packet.dest_ip
+        self.send_down_to_data_link_layer(packet, table["interface"], next_hop)
         pass
 
     def is_local_delivery(self, dest_ip: str) -> bool:
@@ -481,7 +465,6 @@ class NetworkLayer:
         Returns:
             bool
         """
-        # TODO: return dest_ip in self.ip_addresses
         for ip in self.ip_addresses:
             if ip == dest_ip:
                 return True
@@ -542,25 +525,15 @@ class TransportLayer:
     # Sending path (downward from Application Layer)
     # ------------------------------------------------------------------
 
-    def send_data_segment(self, application_data: str):
+    def send_data_segment(self, application_data: int):
         """Reliably send one data chunk using rdt2.2.
 
         Creates a DATA segment, computes its checksum, sends it down, then
         waits for the correct ACK.  Retransmits on wrong or corrupt ACK.
 
         Args:
-            data_chunk – raw data string for this segment (≤ MAX_DATA_SIZE bytes)
+            application_data – payload size in bytes (≤ MAX_DATA_SIZE per segment)
         """
-        # TODO:
-        #   1. compute_checksum
-        #   2. create_segment (SEG_DATA, self.seq_num, data_chunk)
-        #   3. log and call send_segment_to_network_layer
-        #   4. wait for ACK (in simulation: call network path synchronously)
-        #   5. if correct ACK: advance seq_num (0→1 or 1→0)
-        #      else: retransmit
-        application_data = int(application_data)
-        
-       
         fragment_flag, data, self.remaining_data = self.fragmentation(application_data)
             
         checksum = self.compute_checksum(data)
@@ -569,15 +542,11 @@ class TransportLayer:
         self.send_segment_to_network_layer(segment_created)
         pass
 
-    def fragmentation(self, data: int):
-        """Segment application data and reliably send each segment via rdt2.2.
-
-        If len(data) > MAX_DATA_SIZE the message is split into chunks of at
-        most MAX_DATA_SIZE bytes.  Each chunk is sent sequentially; the next
-        chunk is only sent after the current ACK is received.
+    def fragmentation(self, data: int) -> tuple[int, int, int | None]:
+        """Split data size into a sendable chunk and optional remainder.
 
         Args:
-            data – the full application message string
+            data – total payload size in bytes
         """
         print(f"{self.node_name}: Layer 4: Data received from Application Layer. "
               f"Data size={data}")
@@ -594,10 +563,8 @@ class TransportLayer:
     def compute_checksum(self, data: int) -> int:
         """Compute a simple checksum over the segment data.
 
-        Implementation suggestion: sum of ASCII values modulo 65536.
-
         Args:
-            data – segment data string
+            data – payload size in bytes
 
         Returns:
             Integer checksum value (0–65535)
@@ -614,16 +581,15 @@ class TransportLayer:
         Args:
             seg_type  – SEG_DATA or SEG_ACK
             seq_num   – sequence number (0 or 1)
-            data      – payload string (empty for ACK)
+            data      – payload size in bytes (0 for ACK)
             checksum  – pre-computed checksum value
 
         Returns:
             A new Segment object
         """
-        # TODO: return Segment(self.src_port, self.dest_port, seg_type, seq_num,
-        #                       data, checksum)
 
-        return Segment(self.src_port, self.dest_port, segment_type, sequence_number, fragment_flag, data, checksum)
+        return Segment(self.src_port, self.dest_port, fragment_flag,
+                       segment_type, sequence_number, data, checksum)
         pass
 
     def send_segment_to_network_layer(self, segment: Segment):
@@ -633,8 +599,6 @@ class TransportLayer:
             segment – the segment to send
         """
         print(f"{self.node_name}: Layer 4: Segment sent to Network Layer")
-        # TODO: self.network_layer.receive_segment_from_transport_layer(
-        #           segment, self.src_ip, self.dest_ip)
         self.network_layer.receive_segment_from_transport_layer(segment, self.src_ip, self.dest_ip)
         
         # # updating sequence number
@@ -664,7 +628,6 @@ class TransportLayer:
             segment – the received segment
         """
         print(f"{self.node_name}: Layer 4: Segment received from Network Layer")
-        # TODO: branch on segment.type (SEG_DATA vs SEG_ACK)
         # work depending on segmnet.type
 
         # received data
@@ -724,7 +687,6 @@ class TransportLayer:
             True if checksum is valid, False otherwise
         """
         print(f"{self.node_name}: Layer 4: Checksum verified")
-        # TODO: recompute and compare with segment.checksum
         if segment.checksum == self.compute_checksum(segment.data):
             return True
         return False
@@ -737,7 +699,6 @@ class TransportLayer:
             seq_num – sequence number to acknowledge
         """
         print(f"{self.node_name}: Layer 4: ACK sent: seq={sequence_number}")
-        # TODO: create_segment(SEG_ACK, seq_num), send_segment_to_network_layer
         fragment_flag = 0
         checksum = self.compute_checksum(0)
         data = 0
@@ -756,5 +717,4 @@ class TransportLayer:
         """
         print(f"{self.node_name}: Layer 4: DATA segment delivered to Application Layer. "
               f"Data size={data}")
-        # TODO: in this simulation, printing suffices; extend if needed
         pass
