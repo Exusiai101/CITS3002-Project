@@ -12,17 +12,30 @@ from protocol import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_segment(data="hello", seq=0, seg_type=SEG_DATA):
+def make_segment(data: int = 0, seq: int = 0, seg_type: int = SEG_DATA,
+                 fragment_flag: int = 0, checksum: int = 0) -> Segment:
+    """Build a Segment for testing.
+
+    `data` is an int (byte size) in this protocol implementation, since the
+    application data is simulated by size rather than by content.
+    """
     return Segment(src_port=1234, dest_port=5678,
-                   seg_type=seg_type, sequence_number=seq, data=data)
+                   fragment_flag=fragment_flag,
+                   seg_type=seg_type, sequence_number=seq,
+                   data=data, checksum=checksum)
 
 
-def make_packet(dest_ip="10.0.2.20", src_ip="10.0.1.10", ttl=4):
-    return Packet(src_ip=src_ip, dest_ip=dest_ip, ttl=ttl, payload=make_segment())
+def make_packet(dest_ip: str = "10.0.2.20", src_ip: str = "10.0.1.10",
+                ttl: int = 4, payload: Segment | None = None) -> Packet:
+    if payload is None:
+        # data=0 keeps Packet.total_length valid given current Packet impl
+        # (which evaluates `len(payload.data) if payload.data else 0`).
+        payload = make_segment(data=0)
+    return Packet(src_ip=src_ip, dest_ip=dest_ip, ttl=ttl, payload=payload)
 
 
 # ---------------------------------------------------------------------------
-# Constants
+# Module-level constants
 # ---------------------------------------------------------------------------
 
 class TestConstants(unittest.TestCase):
@@ -79,7 +92,7 @@ class TestFrame(unittest.TestCase):
 
 class TestPacket(unittest.TestCase):
     def setUp(self):
-        self.seg = make_segment(data="hello")
+        self.seg = make_segment(data=0)
         self.pkt = Packet("10.0.1.10", "10.0.2.20", ttl=4, payload=self.seg)
 
     def test_fields_set_on_init(self):
@@ -89,13 +102,9 @@ class TestPacket(unittest.TestCase):
         self.assertEqual(self.pkt.protocol, PROTO_UDP)
         self.assertIs(self.pkt.payload, self.seg)
 
-    def test_total_length_is_header_plus_data(self):
-        self.assertEqual(self.pkt.total_length, Packet.HEADER_SIZE + len("hello"))
-
-    def test_total_length_with_empty_segment(self):
-        empty_seg = Segment(1, 2, SEG_ACK, 0, data="")
-        pkt = Packet("10.0.1.10", "10.0.2.20", ttl=4, payload=empty_seg)
-        self.assertEqual(pkt.total_length, Packet.HEADER_SIZE)
+    def test_total_length_with_zero_data(self):
+        # data=0 → falsy branch → total_length is just header
+        self.assertEqual(self.pkt.total_length, Packet.HEADER_SIZE)
 
     def test_get_payload_returns_segment(self):
         self.assertIs(self.pkt.get_payload(), self.seg)
@@ -113,45 +122,60 @@ class TestPacket(unittest.TestCase):
 
 class TestSegment(unittest.TestCase):
     def test_data_segment_fields(self):
-        seg = Segment(1234, 5678, SEG_DATA, 0, "hello", checksum=42)
+        seg = Segment(1234, 5678, fragment_flag=0, seg_type=SEG_DATA,
+                      sequence_number=0, data=5, checksum=42)
         self.assertEqual(seg.src_port, 1234)
         self.assertEqual(seg.dest_port, 5678)
         self.assertEqual(seg.type, SEG_DATA)
         self.assertEqual(seg.sequence_number, 0)
-        self.assertEqual(seg.data, "hello")
+        self.assertEqual(seg.data, 5)
         self.assertEqual(seg.checksum, 42)
+        self.assertEqual(seg.fragment_flag, 0)
 
     def test_ack_segment_fields(self):
-        ack = Segment(1234, 5678, SEG_ACK, 1, data="")
+        ack = Segment(1234, 5678, fragment_flag=0, seg_type=SEG_ACK,
+                      sequence_number=1, data=0)
         self.assertEqual(ack.type, SEG_ACK)
         self.assertEqual(ack.sequence_number, 1)
-        self.assertEqual(ack.data, "")
+        self.assertEqual(ack.data, 0)
 
     def test_length_is_header_plus_data(self):
-        seg = Segment(1, 2, SEG_DATA, 0, data="hello")
-        self.assertEqual(seg.length, Segment.HEADER_SIZE + len("hello"))
+        seg = Segment(1, 2, fragment_flag=0, seg_type=SEG_DATA,
+                      sequence_number=0, data=5)
+        self.assertEqual(seg.length, Segment.HEADER_SIZE + 5)
 
     def test_ack_length_is_header_only(self):
-        ack = Segment(1, 2, SEG_ACK, 1, data="")
+        ack = Segment(1, 2, fragment_flag=0, seg_type=SEG_ACK,
+                      sequence_number=1, data=0)
         self.assertEqual(ack.length, Segment.HEADER_SIZE)
 
-    def test_get_data(self):
-        seg = Segment(1, 2, SEG_DATA, 0, data="world")
-        self.assertEqual(seg.get_data(), "world")
+    def test_get_data_returns_int(self):
+        seg = Segment(1, 2, fragment_flag=0, seg_type=SEG_DATA,
+                      sequence_number=0, data=42)
+        self.assertEqual(seg.get_data(), 42)
 
     def test_repr_data_segment_shows_DATA(self):
-        seg = Segment(1, 2, SEG_DATA, 0, data="hi")
+        seg = Segment(1, 2, fragment_flag=0, seg_type=SEG_DATA,
+                      sequence_number=0, data=2)
         self.assertIn("DATA", repr(seg))
 
     def test_repr_ack_segment_shows_ACK(self):
-        ack = Segment(1, 2, SEG_ACK, 1, data="")
+        ack = Segment(1, 2, fragment_flag=0, seg_type=SEG_ACK,
+                      sequence_number=1, data=0)
         self.assertIn("ACK", repr(ack))
 
     def test_sequence_number_stored(self):
-        seg0 = Segment(1, 2, SEG_DATA, 0, "a")
-        seg1 = Segment(1, 2, SEG_DATA, 1, "b")
+        seg0 = Segment(1, 2, fragment_flag=0, seg_type=SEG_DATA,
+                       sequence_number=0, data=1)
+        seg1 = Segment(1, 2, fragment_flag=0, seg_type=SEG_DATA,
+                       sequence_number=1, data=1)
         self.assertEqual(seg0.sequence_number, 0)
         self.assertEqual(seg1.sequence_number, 1)
+
+    def test_fragment_flag_stored(self):
+        seg = Segment(1, 2, fragment_flag=1, seg_type=SEG_DATA,
+                      sequence_number=0, data=1)
+        self.assertEqual(seg.fragment_flag, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +197,9 @@ class TestDataLinkLayer(unittest.TestCase):
     def test_mac_table_starts_empty(self):
         self.assertEqual(self.dl.mac_table, {})
 
+    def test_interface_table_starts_empty(self):
+        self.assertEqual(self.dl.interface_table, {})
+
     def test_network_layer_starts_none(self):
         self.assertIsNone(self.dl.network_layer)
 
@@ -189,6 +216,7 @@ class TestDataLinkLayer(unittest.TestCase):
         frame = self.dl.create_frame("BB:BB:BB:BB:BB:BB", "AA:AA:AA:AA:AA:AA", pkt)
         self.assertIsInstance(frame, Frame)
         self.assertEqual(frame.dest_mac, "BB:BB:BB:BB:BB:BB")
+        self.assertEqual(frame.src_mac, "AA:AA:AA:AA:AA:AA")
         self.assertIs(frame.payload, pkt)
 
     def test_send_frame_calls_receive_on_destination(self):
@@ -205,6 +233,25 @@ class TestDataLinkLayer(unittest.TestCase):
         self.dl.network_layer = MagicMock()
         pkt = make_packet()
         self.dl.send_up_to_network_layer(pkt)
+        self.dl.network_layer.receive_packet_from_data_link_layer.assert_called_once_with(pkt)
+
+    def test_receive_frame_drops_mismatched_dest_mac(self):
+        # Frame addressed to a different MAC should not propagate upward.
+        self.dl.network_layer = MagicMock()
+        wrong_frame = Frame(dest_mac="ZZ:ZZ:ZZ:ZZ:ZZ:ZZ",
+                            src_mac="BB:BB:BB:BB:BB:BB",
+                            payload=make_packet())
+        self.dl.receive_frame(wrong_frame, interface="eth0")
+        self.dl.network_layer.receive_packet_from_data_link_layer.assert_not_called()
+
+    def test_receive_frame_learns_source_and_passes_up(self):
+        self.dl.network_layer = MagicMock()
+        pkt = make_packet()
+        frame = Frame(dest_mac=self.dl.mac_address,
+                      src_mac="BB:BB:BB:BB:BB:BB",
+                      payload=pkt)
+        self.dl.receive_frame(frame, interface="eth0")
+        self.assertEqual(self.dl.interface_table["BB:BB:BB:BB:BB:BB"], "eth0")
         self.dl.network_layer.receive_packet_from_data_link_layer.assert_called_once_with(pkt)
 
 
@@ -238,7 +285,7 @@ class TestNetworkLayer(unittest.TestCase):
     # --- create_packet ---
 
     def test_create_packet_sets_fields(self):
-        seg = make_segment()
+        seg = make_segment(data=0)
         pkt = self.nl.create_packet("10.0.1.10", "10.0.2.20", seg)
         self.assertIsInstance(pkt, Packet)
         self.assertEqual(pkt.src_ip, "10.0.1.10")
@@ -246,11 +293,12 @@ class TestNetworkLayer(unittest.TestCase):
         self.assertIs(pkt.payload, seg)
 
     def test_create_packet_uses_default_ttl_when_none(self):
-        pkt = self.nl.create_packet("10.0.1.10", "10.0.2.20", make_segment())
+        pkt = self.nl.create_packet("10.0.1.10", "10.0.2.20", make_segment(data=0))
         self.assertEqual(pkt.ttl, NetworkLayer.DEFAULT_TTL)
 
     def test_create_packet_uses_custom_ttl(self):
-        pkt = self.nl.create_packet("10.0.1.10", "10.0.2.20", make_segment(), ttl=2)
+        pkt = self.nl.create_packet("10.0.1.10", "10.0.2.20",
+                                    make_segment(data=0), ttl=2)
         self.assertEqual(pkt.ttl, 2)
 
     # --- routing_table_lookup ---
@@ -260,6 +308,15 @@ class TestNetworkLayer(unittest.TestCase):
         route = self.nl.routing_table_lookup("10.0.2.20")
         self.assertEqual(route["interface"], "eth0")
         self.assertEqual(route["next_hop"], "10.0.1.1")
+
+    def test_routing_table_lookup_longest_prefix_match(self):
+        # Add a more specific route — it should win over /24.
+        nl = NetworkLayer("Test", ["10.0.1.10"], [
+            {"network": "10.0.0.0/8",  "interface": "wan", "next_hop": "10.0.0.1"},
+            {"network": "10.0.2.0/24", "interface": "eth0", "next_hop": "10.0.1.1"},
+        ])
+        route = nl.routing_table_lookup("10.0.2.20")
+        self.assertEqual(route["interface"], "eth0")
 
     def test_routing_table_lookup_raises_for_unroutable_ip(self):
         with self.assertRaises(ValueError):
@@ -312,11 +369,14 @@ class TestNetworkLayer(unittest.TestCase):
         self.nl.data_link_layers["eth0"] = dl
         pkt = make_packet()
         self.nl.send_down_to_data_link_layer(pkt, "eth0", "10.0.1.1")
-        dl.receive_packet_from_network_layer.assert_called_once_with(pkt, "10.0.1.1")
+        # Current implementation forwards (packet, next_hop_ip, interface_label)
+        dl.receive_packet_from_network_layer.assert_called_once_with(
+            pkt, "10.0.1.1", "eth0"
+        )
 
     def test_send_up_calls_transport_layer(self):
         self.nl.transport_layer = MagicMock()
-        seg = make_segment()
+        seg = make_segment(data=0)
         self.nl.send_up_to_transport_layer(seg)
         self.nl.transport_layer.receive_segment_from_network_layer.assert_called_once_with(seg)
 
@@ -337,65 +397,92 @@ class TestTransportLayer(unittest.TestCase):
         self.assertEqual(self.tl.src_ip, "10.0.1.10")
         self.assertEqual(self.tl.dest_ip, "10.0.2.20")
 
-    def test_initial_seq_num_is_zero(self):
-        self.assertEqual(self.tl.seq_num, 0)
+    def test_initial_sequence_number_is_zero(self):
+        self.assertEqual(self.tl.sequence_number, 0)
 
-    def test_initial_last_ack_sent_is_minus_one(self):
-        self.assertEqual(self.tl.last_ack_sent, -1)
+    def test_initial_last_ack_sent_is_zero(self):
+        self.assertEqual(self.tl.last_ack_sent, 0)
+
+    def test_initial_expected_sequence_number_is_zero(self):
+        self.assertEqual(self.tl.expected_sequence_number, 0)
+
+    def test_initial_remaining_data_is_none(self):
+        self.assertIsNone(self.tl.remaining_data)
 
     def test_network_layer_starts_none(self):
         self.assertIsNone(self.tl.network_layer)
 
     # --- compute_checksum ---
 
-    def test_compute_checksum_sum_of_ascii_mod_65536(self):
-        result = self.tl.compute_checksum("hello")
-        expected = sum(ord(c) for c in "hello") % 65536
-        self.assertEqual(result, expected)
+    def test_compute_checksum_formula(self):
+        # Current implementation: (31 * data) % 65536
+        self.assertEqual(self.tl.compute_checksum(10), (31 * 10) % 65536)
 
-    def test_compute_checksum_empty_string_is_zero(self):
-        self.assertEqual(self.tl.compute_checksum(""), 0)
+    def test_compute_checksum_zero_data(self):
+        self.assertEqual(self.tl.compute_checksum(0), 0)
+
+    def test_compute_checksum_wraps_to_16_bits(self):
+        # 31 * 5000 = 155000, mod 65536 = 23928
+        self.assertEqual(self.tl.compute_checksum(5000), 23928)
+        self.assertLess(self.tl.compute_checksum(1_000_000), 65536)
 
     # --- verify_checksum ---
 
     def test_verify_checksum_accepts_valid_segment(self):
-        data = "hello"
-        cksum = sum(ord(c) for c in data) % 65536
-        seg = Segment(1234, 5678, SEG_DATA, 0, data, checksum=cksum)
+        data = 10
+        cksum = (31 * data) % 65536
+        seg = make_segment(data=data, checksum=cksum)
         self.assertTrue(self.tl.verify_checksum(seg))
 
     def test_verify_checksum_rejects_corrupt_segment(self):
-        seg = Segment(1234, 5678, SEG_DATA, 0, "hello", checksum=9999)
+        seg = make_segment(data=10, checksum=9999)
         self.assertFalse(self.tl.verify_checksum(seg))
 
     # --- create_segment ---
 
     def test_create_segment_data_type(self):
-        seg = self.tl.create_segment(SEG_DATA, seq_num=0, data="hello", checksum=42)
+        # create_segment signature: (segment_type, sequence_number, fragment_flag, checksum, data)
+        seg = self.tl.create_segment(SEG_DATA, sequence_number=0,
+                                     fragment_flag=0, checksum=42, data=10)
         self.assertIsInstance(seg, Segment)
         self.assertEqual(seg.src_port, 1234)
         self.assertEqual(seg.dest_port, 5678)
         self.assertEqual(seg.type, SEG_DATA)
         self.assertEqual(seg.sequence_number, 0)
-        self.assertEqual(seg.data, "hello")
+        self.assertEqual(seg.data, 10)
         self.assertEqual(seg.checksum, 42)
 
     def test_create_segment_ack_type(self):
-        ack = self.tl.create_segment(SEG_ACK, seq_num=1)
-        self.assertIsInstance(ack, Segment)
-        self.assertEqual(ack.type, SEG_ACK)
-        self.assertEqual(ack.sequence_number, 1)
-        self.assertEqual(ack.data, "")
+        seg = self.tl.create_segment(SEG_ACK, sequence_number=1,
+                                     fragment_flag=0, checksum=0, data=0)
+        self.assertIsInstance(seg, Segment)
+        self.assertEqual(seg.type, SEG_ACK)
+        self.assertEqual(seg.sequence_number, 1)
+        self.assertEqual(seg.data, 0)
 
     # --- send_segment_to_network_layer ---
 
     def test_send_segment_passes_to_network_layer(self):
         self.tl.network_layer = MagicMock()
-        seg = make_segment()
+        seg = make_segment(data=0)
         self.tl.send_segment_to_network_layer(seg)
         self.tl.network_layer.receive_segment_from_transport_layer.assert_called_once_with(
             seg, "10.0.1.10", "10.0.2.20"
         )
+
+    # --- fragmentation ---
+
+    def test_fragmentation_no_split_when_under_limit(self):
+        flag, data, remaining = self.tl.fragmentation(100)
+        self.assertEqual(flag, 0)
+        self.assertEqual(data, 100)
+        self.assertIsNone(remaining)
+
+    def test_fragmentation_splits_when_over_limit(self):
+        flag, data, remaining = self.tl.fragmentation(MAX_DATA_SIZE + 200)
+        self.assertEqual(flag, 1)
+        self.assertEqual(data, MAX_DATA_SIZE)
+        self.assertEqual(remaining, 200)
 
 
 if __name__ == "__main__":
