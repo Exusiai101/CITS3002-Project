@@ -62,7 +62,7 @@ class Packet:
         self.ttl          = ttl
         self.protocol     = protocol
         self.payload      = payload  # Segment
-        self.total_length = self.HEADER_SIZE + (len(payload.data) if payload.data else 0)
+        self.total_length = self.HEADER_SIZE + (payload.data if payload.data else 0)
 
     def get_payload(self):
         return self.payload
@@ -341,6 +341,8 @@ class NetworkLayer:
         new_packet = self.create_packet(src_ip, dest_ip, segment)
         table = self.routing_table_lookup(dest_ip)
         self.send_down_to_data_link_layer(new_packet, table["interface"], table["next_hop"])
+        print(f"{self.node_name}: Layer 3: Next-hop IP determined: {table['next_hop']}")
+        print(f"{self.node_name}: Layer 3: Outgoing interface selected ({table['interface']})")
         pass
 
     def create_packet(self, src_ip: str, dest_ip: str, segment: Segment,
@@ -443,12 +445,16 @@ class NetworkLayer:
         print(f"{self.node_name}: Layer 3: Packet received from Data Link Layer: "
               f"SRC_IP={packet.src_ip}, DST_IP={packet.dest_ip}, TTL={packet.ttl}")
         # TODO: check dest_ip, TTL decrement, route or deliver
+        print(f"{self.node_name}: Layer 3: Destination IP read: {packet.dest_ip}")
         if self.is_local_delivery(packet.dest_ip):
             # TODO: perform Local delivery
+            print(f"{self.node_name}: Layer 3: Packet identified as local delivery")
             self.send_up_to_transport_layer(packet.get_payload())
         else:
+            old_ttl = packet.ttl
             packet.ttl -= 1
             self.forward_packet(packet)
+            print(f"{self.node_name}: Layer 3: TTL decremented: {old_ttl} → {packet.ttl}")
         pass
 
     def forward_packet(self, packet: Packet):
@@ -470,6 +476,8 @@ class NetworkLayer:
             table = self.routing_table_lookup(packet.dest_ip)
             if table:
                 self.send_down_to_data_link_layer(packet, table["interface"], table["next_hop"])
+                print(f"{self.node_name}: Layer 3: Next-hop IP determined: {table['next_hop']}")
+                print(f"{self.node_name}: Layer 3: Outgoing interface selected ({table['interface']})")
         pass
 
     def is_local_delivery(self, dest_ip: str) -> bool:
@@ -567,6 +575,7 @@ class TransportLayer:
         segment_created = self.create_segment(SEG_DATA, self.sequence_number, fragment_flag, checksum, data)
         self.backup_sent_data_segment = segment_created
         self.send_segment_to_network_layer(segment_created)
+        print(f"{self.node_name}: Layer 4: Segment created by adding transport layer header " f"(DATA, seq={self.sequence_number}) (encapsulation)")
         pass
 
     def fragmentation(self, data: int):
@@ -693,7 +702,7 @@ class TransportLayer:
             if self.verify_checksum(segment):
                 # expecting same sequence number first
                 if self.sequence_number == segment.sequence_number:
-                    print(f"ACK received: seq={self.sequence_number}")
+                    print(f"{self.node_name}: Layer 4: ACK received: seq={self.sequence_number}")
 
                     # updateing the expect sequence number
                     self.sequence_number = self.sequence_number + 1
