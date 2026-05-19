@@ -1,15 +1,19 @@
 # protocol.py
 # Contains header definitions (Frame, Packet, Segment) and layer class skeletons
 # for Layer 2 (Data Link), Layer 3 (Network), and Layer 4 (Transport).
-from pip._internal.operations import check
-
-from intial_idea import segment
 
 TYPE_IPV4 = 0x0800   # Ethernet type field value for IPv4
 PROTO_UDP = 17       # IP protocol field value for UDP-like payload
 SEG_DATA  = 0        # Transport segment type: DATA
 SEG_ACK   = 1        # Transport segment type: ACK
 MAX_DATA_SIZE = 500  # Maximum payload bytes per transport segment
+
+
+def _fmt_iface(label: str) -> str:
+    """Format internal interface label (e.g. 'interface_1') as 'Interface 1'."""
+    if label and label.startswith("interface_"):
+        return "Interface " + label.split("_", 1)[1]
+    return label
 
 
 # ---------------------------------------------------------------------------
@@ -58,14 +62,14 @@ class Packet:
 
     HEADER_SIZE = 20  # fixed header overhead in bytes (simplified)
 
-    def __init__(self, src_ip: str, dest_ip: str, ttl: int, payload : Segment,
+    def __init__(self, src_ip: str, dest_ip: str, ttl: int, payload: "Segment",
                  protocol: int = PROTO_UDP):
         self.src_ip       = src_ip
         self.dest_ip      = dest_ip
         self.ttl          = ttl
         self.protocol     = protocol
         self.payload      = payload  # Segment
-        self.total_length = self.HEADER_SIZE + payload.data
+        self.total_length = self.HEADER_SIZE + (payload.data if payload.data else 0)
 
     def get_payload(self):
         return self.payload
@@ -171,18 +175,21 @@ class DataLinkLayer:
 
         # using the next hop ip from L3 find its mac address, as L2 use mac address
         dest_mac = self.mac_lookup(next_hop_ip)
+        print(f"{self.node_name}: Layer 2: Destination MAC lookup for next-hop IP "
+              f"({next_hop_ip}) → {dest_mac}")
 
-        # create a frame data structue, where the dest mac is router, 
-        # sending from current node so itself (node) mac address, 
+        # create a frame data structue, where the dest mac is router,
+        # sending from current node so itself (node) mac address,
         # the packet itself will be pass it as payload
         frame = self.create_frame(dest_mac, self.mac_address, packet)
+        print(f"{self.node_name}: Layer 2: Frame created: "
+              f"SRC_MAC={self.mac_address}, DST_MAC={dest_mac}")
 
-        # find which object is going to transmiss to within the same network using the hardcoded interface 
+        # find which object is going to transmiss to within the same network using the hardcoded interface
         destination, interface = self.network_neighbour[outgoing_interface]
 
         # send to the router by call the router's L2 function
-        self.send_frame(frame, destination, interface)
-        pass
+        self.send_frame(frame, destination, interface, outgoing_interface)
 
     def mac_lookup(self, next_hop_ip: str) -> str:
         """Return the MAC address for the given next-hop IP.
@@ -214,19 +221,26 @@ class DataLinkLayer:
         return Frame(dest_mac, src_mac, packet)
         pass
 
-    def send_frame(self, frame: Frame, destination : object, interface: str):
+    def send_frame(self, frame: Frame, destination: object, interface: str,
+                   outgoing_interface: str = ""):
         """Transmit a Frame to the next node's DataLinkLayer.
 
         In this simulation 'sending' means calling destination.receive_frame().
 
         Args:
-            frame       – the Frame to transmit
-            destination – the receiving DataLinkLayer instance
+            frame              – the Frame to transmit
+            destination        – the receiving DataLinkLayer instance
+            interface          – label of the destination's incoming interface
+            outgoing_interface – label of this node's outgoing interface (used
+                                 by the router to log 'Frame forwarded on Interface X')
         """
-        print(f"{self.node_name}: Layer 2: Frame sent")
+        if outgoing_interface and outgoing_interface.startswith("interface_"):
+            print(f"{self.node_name}: Layer 2: Frame forwarded on "
+                  f"{_fmt_iface(outgoing_interface)}")
+        else:
+            print(f"{self.node_name}: Layer 2: Frame sent")
         # by passing in the dest (router) object, making the dest (router) object to call received, making passing possible
         destination.receive_frame(frame, interface)
-        pass
 
     # ------------------------------------------------------------------
     # Receiving path (upward from the link / toward Network Layer)
@@ -245,20 +259,20 @@ class DataLinkLayer:
             frame     – the received Frame
             interface – label of the interface it arrived on (for routers)
         """
+        is_router_iface = interface.startswith("interface_") if interface else False
         print(f"{self.node_name}: Layer 2: Frame received"
-              + (f" on {interface}" if interface else ""))
+              + (f" on {_fmt_iface(interface)}" if is_router_iface else ""))
 
         # check the dest mac is matching node's mac address
         if frame.dest_mac != self.mac_address:
             print('wrong mac address')
-            return 
-        
+            return
+
         # building the relation between src mac and the interface
         self.mac_learning(frame.src_mac, interface)
-        
+
         # passing the frame payload up
         self.send_up_to_network_layer(frame.payload)
-        pass
 
     def mac_learning(self, src_mac: str, interface: str = ""):
         """Record the source MAC → interface mapping in mac_table.
@@ -267,12 +281,12 @@ class DataLinkLayer:
             src_mac   – source MAC address extracted from the received frame
             interface – interface label (informational)
         """
+        is_router_iface = interface.startswith("interface_") if interface else False
         print(f"{self.node_name}: Layer 2: Source MAC learned: {src_mac}"
-              + (f" on {interface}" if interface else ""))
+              + (f" on {_fmt_iface(interface)}" if is_router_iface else ""))
 
         # learning and mapping the relationship between src ac address and the interface
         self.interface_table[src_mac] = interface
-        pass
 
     def send_up_to_network_layer(self, packet: Packet):
         """Deliver the decapsulated Packet to the Network Layer.
@@ -337,12 +351,18 @@ class NetworkLayer:
         """
         print(f"{self.node_name}: Layer 3: Segment received from Transport Layer: "
               f"SRC_IP={src_ip}, DST_IP={dest_ip}, TTL={self.DEFAULT_TTL}")
+        print(f"{self.node_name}: Layer 3: Destination IP read: {dest_ip}")
         new_packet = self.create_packet(src_ip, dest_ip, segment)
         table = self.routing_table_lookup(dest_ip)
-        self.send_down_to_data_link_layer(new_packet, table["interface"], table["next_hop"])
-        print(f"{self.node_name}: Layer 3: Next-hop IP determined: {table['next_hop']}")
-        print(f"{self.node_name}: Layer 3: Outgoing interface selected ({table['interface']})")
-        pass
+        next_hop = table["next_hop"] if table["next_hop"] is not None else dest_ip
+        print(f"{self.node_name}: Layer 3: Next-hop IP determined: {next_hop}")
+        # Hosts log without interface name; routers append the formatted label.
+        if self.node_name == "Router R1":
+            print(f"{self.node_name}: Layer 3: Outgoing interface selected "
+                  f"({_fmt_iface(table['interface'])})")
+        else:
+            print(f"{self.node_name}: Layer 3: Outgoing interface selected")
+        self.send_down_to_data_link_layer(new_packet, table["interface"], next_hop)
 
     def create_packet(self, src_ip: str, dest_ip: str, segment: Segment,
                       ttl: int = None) -> Packet:
@@ -439,18 +459,15 @@ class NetworkLayer:
         """
         print(f"{self.node_name}: Layer 3: Packet received from Data Link Layer: "
               f"SRC_IP={packet.src_ip}, DST_IP={packet.dest_ip}, TTL={packet.ttl}")
-        # TODO: check dest_ip, TTL decrement, route or deliver
         print(f"{self.node_name}: Layer 3: Destination IP read: {packet.dest_ip}")
         if self.is_local_delivery(packet.dest_ip):
-            # TODO: perform Local delivery
             print(f"{self.node_name}: Layer 3: Packet identified as local delivery")
             self.send_up_to_transport_layer(packet.get_payload())
         else:
             old_ttl = packet.ttl
             packet.ttl -= 1
-            self.forward_packet(packet)
             print(f"{self.node_name}: Layer 3: TTL decremented: {old_ttl} → {packet.ttl}")
-        pass
+            self.forward_packet(packet)
 
     def forward_packet(self, packet: Packet):
         """Route and forward a transit packet (router behaviour).
@@ -467,11 +484,13 @@ class NetworkLayer:
             return
         table = self.routing_table_lookup(packet.dest_ip)
         next_hop = table["next_hop"] if table["next_hop"] is not None else packet.dest_ip
-        print(f"{self.node_name}: Layer 3: Next-hop IP determined: {table['next_hop']}")
-        print(f"{self.node_name}: Layer 3: Outgoing interface selected ({table['interface']})")
+        print(f"{self.node_name}: Layer 3: Next-hop IP determined: {next_hop}")
+        if self.node_name == "Router R1":
+            print(f"{self.node_name}: Layer 3: Outgoing interface selected "
+                  f"({_fmt_iface(table['interface'])})")
+        else:
+            print(f"{self.node_name}: Layer 3: Outgoing interface selected")
         self.send_down_to_data_link_layer(packet, table["interface"], next_hop)
-        
-        pass
 
     def is_local_delivery(self, dest_ip: str) -> bool:
         """Return True if dest_ip belongs to one of this node's interfaces.
@@ -554,25 +573,22 @@ class TransportLayer:
         Args:
             application_data – payload size in bytes (≤ MAX_DATA_SIZE per segment)
         """
-        # fragment_flag, data, self.remaining_data = self.fragmentation(application_data)
         fragment_flag, self.remaining_data = self.fragmentation(application_data)
         while self.remaining_data:
-            checksum = self.compute_checksum(self.remaining_data[0])
+            chunk = self.remaining_data[0]
+            checksum = self.compute_checksum(chunk)
+            print(f"{self.node_name}: Layer 4: Checksum computed")
             segment_created = self.create_segment(SEG_DATA, self.sequence_number,
-                                                  fragment_flag, checksum, self.remaining_data[0])
+                                                  fragment_flag, checksum, chunk)
+            print(f"{self.node_name}: Layer 4: Segment created by adding transport "
+                  f"layer header (DATA, seq={self.sequence_number}) (encapsulation)")
+            self.backup_sent_data_segment = segment_created
             self.send_segment_to_network_layer(segment_created)
-            if self.received_data:
-                if self.received_data[0].is_ack():
-                    self.received_data.pop(0)
-                    self.remaining_data.pop(0)
-                else:
-                    continue
-        # checksum = self.compute_checksum(data)
-        # segment_created = self.create_segment(SEG_DATA, self.sequence_number, fragment_flag, checksum, data)
-        # self.backup_sent_data_segment = segment_created
-        # self.send_segment_to_network_layer(segment_created)
-        # print(f"{self.node_name}: Layer 4: Segment created by adding transport layer header " f"(DATA, seq={self.sequence_number}) (encapsulation)")
-        pass
+            # send_segment_to_network_layer is synchronous: by the time it returns the
+            # ACK round-trip has completed and self.received_data holds the ACK.
+            if self.received_data and self.received_data[0].is_ack():
+                self.received_data.pop(0)
+                self.remaining_data.pop(0)
 
     def fragmentation(self, data: int):
         """Segment application data and reliably send each segment via rdt2.2.
@@ -584,7 +600,6 @@ class TransportLayer:
         Args:
             data – total payload size in bytes
         """
-        # TODO: store the frag to self.remaining_data
         print(f"{self.node_name}: Layer 4: Data received from Application Layer. "
               f"Data size={data}")
         # TODO: split data into chunks <= MAX_DATA_SIZE, call _send_segment for each
@@ -615,10 +630,7 @@ class TransportLayer:
         Returns:
             Integer checksum value (0–65535)
         """
-        print(f"{self.node_name}: Layer 4: Checksum computed")
-        # TODO: return sum(ord(c) for c in data) % 65536
         return (31 * data) % 65536
-        pass
 
     def create_segment(self, segment_type :int, sequence_number: int, fragment_flag: int, 
                        checksum: int, data: int = 0) -> Segment:
@@ -749,16 +761,14 @@ class TransportLayer:
         Args:
             seq_num – sequence number to acknowledge
         """
-        print(f"{self.node_name}: Layer 4: ACK sent: seq={sequence_number}")
         fragment_flag = 0
         checksum = self.compute_checksum(0)
-        data = 0
-        segment_type = SEG_ACK
-        segment = self.create_segment(segment_type, sequence_number, fragment_flag, checksum, data)
+        segment = self.create_segment(SEG_ACK, sequence_number, fragment_flag, checksum, 0)
+        print(f"{self.node_name}: Layer 4: Segment created by adding transport "
+              f"layer header (ACK, seq={sequence_number})")
         self.send_segment_to_network_layer(segment)
         # update the last ack value
         self.last_ack_sent = segment.sequence_number
-        pass
 
     def deliver_to_application(self, data: int):
         """Deliver received data to the application layer (print / return).
