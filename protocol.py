@@ -55,7 +55,7 @@ class Packet:
 
     HEADER_SIZE = 20  # fixed header overhead in bytes (simplified)
 
-    def __init__(self, src_ip: str, dest_ip: str, ttl: int, payload,
+    def __init__(self, src_ip: str, dest_ip: str, ttl: int, payload : Segment,
                  protocol: int = PROTO_UDP):
         self.src_ip       = src_ip
         self.dest_ip      = dest_ip
