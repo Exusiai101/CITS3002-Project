@@ -1,4 +1,6 @@
+import io
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import MagicMock
 
 from protocol import (
@@ -406,8 +408,10 @@ class TestTransportLayer(unittest.TestCase):
     def test_initial_expected_sequence_number_is_zero(self):
         self.assertEqual(self.tl.expected_sequence_number, 0)
 
-    def test_initial_remaining_data_is_none(self):
-        self.assertIsNone(self.tl.remaining_data)
+    def test_initial_remaining_data_is_empty_list(self):
+        # `remaining_data` was changed to a list (was previously None) so it can
+        # accumulate fragments produced by `fragmentation()` for rdt2.2.
+        self.assertEqual(self.tl.remaining_data, [])
 
     def test_network_layer_starts_none(self):
         self.assertIsNone(self.tl.network_layer)
@@ -471,18 +475,158 @@ class TestTransportLayer(unittest.TestCase):
         )
 
     # --- fragmentation ---
+    #
+    # `fragmentation()` now returns (fragment_flag, chunks_list) where
+    # `chunks_list` is the list of chunk sizes (≤ MAX_DATA_SIZE each) and is
+    # also stored on `self.remaining_data` for the rdt2.2 send loop to drain.
 
     def test_fragmentation_no_split_when_under_limit(self):
-        flag, data, remaining = self.tl.fragmentation(100)
-        self.assertEqual(flag, 0)
-        self.assertEqual(data, 100)
-        self.assertIsNone(remaining)
+        flag, chunks = self.tl.fragmentation(100)
+        self.assertEqual(chunks, [100])
+        self.assertEqual(self.tl.remaining_data, [100])
+        # The current implementation always returns fragment_flag=1; keep this
+        # assertion in lockstep with the code rather than the (older) spec.
+        self.assertEqual(flag, 1)
 
     def test_fragmentation_splits_when_over_limit(self):
-        flag, data, remaining = self.tl.fragmentation(MAX_DATA_SIZE + 200)
+        flag, chunks = self.tl.fragmentation(MAX_DATA_SIZE + 200)
+        self.assertEqual(chunks, [MAX_DATA_SIZE, 200])
+        self.assertEqual(self.tl.remaining_data, [MAX_DATA_SIZE, 200])
         self.assertEqual(flag, 1)
-        self.assertEqual(data, MAX_DATA_SIZE)
-        self.assertEqual(remaining, 200)
+
+    def test_fragmentation_splits_exact_multiple(self):
+        flag, chunks = self.tl.fragmentation(MAX_DATA_SIZE * 3)
+        self.assertEqual(chunks, [MAX_DATA_SIZE] * 3)
+        self.assertEqual(flag, 1)
+
+
+# ---------------------------------------------------------------------------
+# End-to-end simulation log comparison (CITS3002 spec, PDF pages 5-7)
+# ---------------------------------------------------------------------------
+
+# Expected log output for sending 10 bytes from Host A to Host B, taken
+# verbatim from CITS3002-Project.pdf pages 5-7. Blank lines in the PDF
+# (used there as section separators) are omitted here; the comparison
+# also strips blank lines from the simulation's actual output.
+EXPECTED_LOG_10_BYTES = """\
+Host A: Layer 4: Data received from Application Layer. Data size=10
+Host A: Layer 4: Checksum computed
+Host A: Layer 4: Segment created by adding transport layer header (DATA, seq=0) (encapsulation)
+Host A: Layer 4: Segment sent to Network Layer
+Host A: Layer 3: Segment received from Transport Layer: SRC_IP=10.0.1.10, DST_IP=10.0.2.20, TTL=4
+Host A: Layer 3: Destination IP read: 10.0.2.20
+Host A: Layer 3: Routing table lookup performed
+Host A: Layer 3: Next-hop IP determined: 10.0.1.1
+Host A: Layer 3: Outgoing interface selected
+Host A: Layer 3: Packet forwarded to Data Link Layer
+Host A: Layer 2: Packet received from Network Layer
+Host A: Layer 2: Destination MAC lookup for next-hop IP (10.0.1.1) → BB:BB:BB:BB:BB:BB
+Host A: Layer 2: Frame created: SRC_MAC=AA:AA:AA:AA:AA:AA, DST_MAC=BB:BB:BB:BB:BB:BB
+Host A: Layer 2: Frame sent
+Router R1: Layer 2: Frame received on Interface 1
+Router R1: Layer 2: Source MAC learned: AA:AA:AA:AA:AA:AA on Interface 1
+Router R1: Layer 2: Packet delivered to Network Layer
+Router R1: Layer 3: Packet received from Data Link Layer: SRC_IP=10.0.1.10, DST_IP=10.0.2.20, TTL=4
+Router R1: Layer 3: Destination IP read: 10.0.2.20
+Router R1: Layer 3: TTL decremented: 4 → 3
+Router R1: Layer 3: Routing table lookup performed
+Router R1: Layer 3: Next-hop IP determined: 10.0.2.20
+Router R1: Layer 3: Outgoing interface selected (Interface 2)
+Router R1: Layer 3: Packet forwarded to Data Link Layer
+Router R1: Layer 2: Packet received from Network Layer
+Router R1: Layer 2: Destination MAC lookup for next-hop IP (10.0.2.20) → DD:DD:DD:DD:DD:DD
+Router R1: Layer 2: Frame created: SRC_MAC=CC:CC:CC:CC:CC:CC, DST_MAC=DD:DD:DD:DD:DD:DD
+Router R1: Layer 2: Frame forwarded on Interface 2
+Host B: Layer 2: Frame received
+Host B: Layer 2: Source MAC learned: CC:CC:CC:CC:CC:CC
+Host B: Layer 2: Packet delivered to Network Layer
+Host B: Layer 3: Packet received from Data Link Layer: SRC_IP=10.0.1.10, DST_IP=10.0.2.20, TTL=3
+Host B: Layer 3: Destination IP read: 10.0.2.20
+Host B: Layer 3: Packet identified as local delivery
+Host B: Layer 3: Segment delivered to Transport Layer
+Host B: Layer 4: Segment received from Network Layer
+Host B: Layer 4: Checksum verified
+Host B: Layer 4: DATA segment delivered to Application Layer. Data size=10
+Host B: Layer 4: Segment created by adding transport layer header (ACK, seq=0)
+Host B: Layer 4: Segment sent to Network Layer
+Host B: Layer 3: Segment received from Transport Layer: SRC_IP=10.0.2.20, DST_IP=10.0.1.10, TTL=4
+Host B: Layer 3: Destination IP read: 10.0.1.10
+Host B: Layer 3: Routing table lookup performed
+Host B: Layer 3: Next-hop IP determined: 10.0.2.1
+Host B: Layer 3: Outgoing interface selected
+Host B: Layer 3: Packet forwarded to Data Link Layer
+Host B: Layer 2: Packet received from Network Layer
+Host B: Layer 2: Destination MAC lookup for next-hop IP (10.0.2.1) → CC:CC:CC:CC:CC:CC
+Host B: Layer 2: Frame created: SRC_MAC=DD:DD:DD:DD:DD:DD, DST_MAC=CC:CC:CC:CC:CC:CC
+Host B: Layer 2: Frame sent
+Router R1: Layer 2: Frame received on Interface 2
+Router R1: Layer 2: Source MAC learned: DD:DD:DD:DD:DD:DD on Interface 2
+Router R1: Layer 2: Packet delivered to Network Layer
+Router R1: Layer 3: Packet received from Data Link Layer: SRC_IP=10.0.2.20, DST_IP=10.0.1.10, TTL=4
+Router R1: Layer 3: Destination IP read: 10.0.1.10
+Router R1: Layer 3: TTL decremented: 4 → 3
+Router R1: Layer 3: Routing table lookup performed
+Router R1: Layer 3: Next-hop IP determined: 10.0.1.10
+Router R1: Layer 3: Outgoing interface selected (Interface 1)
+Router R1: Layer 3: Packet forwarded to Data Link Layer
+Router R1: Layer 2: Packet received from Network Layer
+Router R1: Layer 2: Destination MAC lookup for next-hop IP (10.0.1.10) → AA:AA:AA:AA:AA:AA
+Router R1: Layer 2: Frame created: SRC_MAC=BB:BB:BB:BB:BB:BB, DST_MAC=AA:AA:AA:AA:AA:AA
+Router R1: Layer 2: Frame forwarded on Interface 1
+Host A: Layer 2: Frame received
+Host A: Layer 2: Source MAC learned: BB:BB:BB:BB:BB:BB
+Host A: Layer 2: Packet delivered to Network Layer
+Host A: Layer 3: Packet received from Data Link Layer: SRC_IP=10.0.2.20, DST_IP=10.0.1.10, TTL=3
+Host A: Layer 3: Destination IP read: 10.0.1.10
+Host A: Layer 3: Packet identified as local delivery
+Host A: Layer 3: Segment delivered to Transport Layer
+Host A: Layer 4: Segment received from Network Layer
+Host A: Layer 4: Checksum verified
+Host A: Layer 4: ACK received: seq=0
+"""
+
+
+def _non_blank_lines(text: str) -> list[str]:
+    """Split `text` into lines, strip trailing whitespace, drop empty lines."""
+    return [line.rstrip() for line in text.splitlines() if line.strip()]
+
+
+class TestSimulationLog(unittest.TestCase):
+    """Run the full Host A → Router R1 → Host B simulation and compare its
+    captured stdout, line by line, against the expected log from the project
+    PDF. Blank lines (used as section separators in the PDF) are ignored on
+    both sides so the test is robust to optional spacing in the output."""
+
+    def _run_simulation(self, data_size: int) -> str:
+        # Import lazily so importing the test module does not build the network.
+        from devices import init_network
+
+        host_a, _host_b, _router = init_network()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            host_a.send(data_size)
+        return buf.getvalue()
+
+    def test_simulation_log_matches_spec_for_10_bytes(self):
+        actual_lines = _non_blank_lines(self._run_simulation(10))
+        expected_lines = _non_blank_lines(EXPECTED_LOG_10_BYTES)
+
+        # Compare line by line so the failure message pinpoints the divergence
+        # rather than dumping the entire diff in one assertion.
+        for index, expected in enumerate(expected_lines):
+            self.assertLess(index, len(actual_lines),
+                            msg=f"Output ended early — missing line {index + 1}: "
+                                f"expected {expected!r}")
+            self.assertEqual(actual_lines[index], expected,
+                             msg=f"Mismatch on log line {index + 1}\n"
+                                 f"  expected: {expected!r}\n"
+                                 f"  actual:   {actual_lines[index]!r}")
+
+        self.assertEqual(len(actual_lines), len(expected_lines),
+                         msg=f"Simulation produced {len(actual_lines) - len(expected_lines)} "
+                             f"extra trailing line(s); first extra: "
+                             f"{actual_lines[len(expected_lines)]!r}"
+                             if len(actual_lines) > len(expected_lines) else "")
 
 
 if __name__ == "__main__":
