@@ -204,7 +204,6 @@ class DataLinkLayer:
         """
         # return the result after using next hop ip to find it mac address
         return self.mac_table[next_hop_ip]
-        pass
 
     def create_frame(self, dest_mac: str, src_mac: str, packet: Packet) -> Frame:
         """Wrap a Packet inside an Ethernet-like Frame.
@@ -219,7 +218,6 @@ class DataLinkLayer:
         """
         # return the create Frame data strcture
         return Frame(dest_mac, src_mac, packet)
-        pass
 
     def send_frame(self, frame: Frame, destination: object, interface: str,
                    outgoing_interface: str = ""):
@@ -265,7 +263,7 @@ class DataLinkLayer:
 
         # check the dest mac is matching node's mac address
         if frame.dest_mac != self.mac_address:
-            print('wrong mac address')
+            print(f"{self.node_name}: Layer 2: Frame dropped (MAC mismatch)")
             return
 
         # building the relation between src mac and the interface
@@ -298,7 +296,6 @@ class DataLinkLayer:
 
         # by passing the payload from the frame, passing the informatin up to L3
         self.network_layer.receive_packet_from_data_link_layer(packet)
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -349,10 +346,10 @@ class NetworkLayer:
             src_ip  – source IP for the packet header
             dest_ip – destination IP for the packet header
         """
-        print(f"{self.node_name}: Layer 3: Segment received from Transport Layer: "
-              f"SRC_IP={src_ip}, DST_IP={dest_ip}, TTL={self.DEFAULT_TTL}")
-        print(f"{self.node_name}: Layer 3: Destination IP read: {dest_ip}")
         new_packet = self.create_packet(src_ip, dest_ip, segment)
+        print(f"{self.node_name}: Layer 3: Segment received from Transport Layer: "
+              f"SRC_IP={src_ip}, DST_IP={dest_ip}, TTL={new_packet.ttl}")
+        print(f"{self.node_name}: Layer 3: Destination IP read: {dest_ip}")
         table = self.routing_table_lookup(dest_ip)
         next_hop = table["next_hop"] if table["next_hop"] is not None else dest_ip
         print(f"{self.node_name}: Layer 3: Next-hop IP determined: {next_hop}")
@@ -429,7 +426,6 @@ class NetworkLayer:
             raise ValueError(f"No matching route found for {dest_ip}")
 
         return best_match
-        pass
 
     def send_down_to_data_link_layer(self, packet: Packet,
                                       interface: str, next_hop_ip: str):
@@ -442,7 +438,6 @@ class NetworkLayer:
         """
         print(f"{self.node_name}: Layer 3: Packet forwarded to Data Link Layer")
         self.data_link_layers[interface].receive_packet_from_network_layer(packet, next_hop_ip, interface)
-        pass
 
     # ------------------------------------------------------------------
     # Receiving / forwarding path (upward from Data Link Layer)
@@ -549,7 +544,7 @@ class TransportLayer:
         self.src_ip        = src_ip
         self.dest_ip       = dest_ip
 
-        self.remaining_data : list[int]= [] # TODO: this should be a []
+        self.remaining_data : list[int]= []
         self.received_data : list[Segment] = []
 
         self.backup_sent_data_segment = None
@@ -602,9 +597,7 @@ class TransportLayer:
         """
         print(f"{self.node_name}: Layer 4: Data received from Application Layer. "
               f"Data size={data}")
-        # TODO: split data into chunks <= MAX_DATA_SIZE, call _send_segment for each
         is_fragment = 1
-        is_not_fragment = 0
         while data > 0:
             if data > MAX_DATA_SIZE:
                 self.remaining_data.append(MAX_DATA_SIZE)
@@ -613,13 +606,6 @@ class TransportLayer:
                 self.remaining_data.append(data)
                 break
         return is_fragment, self.remaining_data
-        # if data > MAX_DATA_SIZE:
-        #     remaining = data - MAX_DATA_SIZE
-        #     return is_fragment, int(MAX_DATA_SIZE), remaining
-        # TODO: not fragment should be checked in main
-        # else:
-        #     return is_not_fragment, data, None
-        # pass
 
     def compute_checksum(self, data: int) -> int:
         """Compute a simple checksum over the segment data.
@@ -648,7 +634,6 @@ class TransportLayer:
 
         return Segment(self.src_port, self.dest_port, fragment_flag,
                        segment_type, sequence_number, data, checksum)
-        pass
 
     def send_segment_to_network_layer(self, segment: Segment):
         """Pass a Segment down to the Network Layer for transmission.
@@ -658,12 +643,6 @@ class TransportLayer:
         """
         print(f"{self.node_name}: Layer 4: Segment sent to Network Layer")
         self.network_layer.receive_segment_from_transport_layer(segment, self.src_ip, self.dest_ip)
-        
-        # # updating sequence number
-        # self.sequence_number = self.sequence_number + 1
-        # if self.sequence_number > 1:
-        #     self.sequence_number = 0
-        # pass
 
     # ------------------------------------------------------------------
     # Receiving path (upward from Network Layer)
@@ -720,25 +699,14 @@ class TransportLayer:
                     self.sequence_number = self.sequence_number + 1
                     if self.sequence_number > 1:
                         self.sequence_number = 0
-                    # TODO return directly
                     self.received_data.append(segment)
                     return
-
-                    # send next segment if fragmentation still have reminding data
-                    if self.remaining_data is not None: 
-                        # data transmission
-                        self.send_data_segment(self.remaining_data)
-                    # if no reminding data do nothing
-                    else :
-                        return
                 else:
                     # if different, must be the last sent segment need to resend
                     self.send_segment_to_network_layer(self.backup_sent_data_segment)
             else:
                 # checksum incorrect, request retransmission
                 self.send_segment_to_network_layer(self.backup_sent_data_segment)
-
-        pass
 
     def verify_checksum(self, segment: Segment) -> bool:
         """Verify the checksum of a received segment.
@@ -753,7 +721,6 @@ class TransportLayer:
         if segment.checksum == self.compute_checksum(segment.data):
             return True
         return False
-        pass
 
     def _send_ack_segment(self, sequence_number: int):
         """Create and send an ACK segment for the given sequence number.
@@ -778,4 +745,3 @@ class TransportLayer:
         """
         print(f"{self.node_name}: Layer 4: DATA segment delivered to Application Layer. "
               f"Data size={data}")
-        pass
