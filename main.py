@@ -3,6 +3,7 @@ import sys
 from devices import init_network
 
 if __name__ == "__main__":
+
     if len(sys.argv) == 1:
         print("No arguments provided. It will be set to 500 bytes.")
         data_size = 500

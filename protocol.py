@@ -1,6 +1,9 @@
 # protocol.py
 # Contains header definitions (Frame, Packet, Segment) and layer class skeletons
 # for Layer 2 (Data Link), Layer 3 (Network), and Layer 4 (Transport).
+from pip._internal.operations import check
+
+from intial_idea import segment
 
 TYPE_IPV4 = 0x0800   # Ethernet type field value for IPv4
 PROTO_UDP = 17       # IP protocol field value for UDP-like payload
@@ -110,6 +113,9 @@ class Segment:
         kind = "DATA" if self.type == SEG_DATA else "ACK"
         return (f"Segment(type={kind}, seq={self.sequence_number}, "
                 f"len={self.length}, cksum={self.checksum})")
+
+    def is_ack(self):
+        return self.type == SEG_ACK
 
 
 # ---------------------------------------------------------------------------
@@ -523,7 +529,10 @@ class TransportLayer:
         self.dest_port     = dest_port
         self.src_ip        = src_ip
         self.dest_ip       = dest_ip
-        self.remaining_data = None
+
+        self.remaining_data : list[int]= [] # TODO: this should be a []
+        self.received_data : list[Segment] = []
+
         self.backup_sent_data_segment = None
         self.segment_type  = 0 
         self.sequence_number = 0   # alternating bit between 0 and 1
@@ -545,13 +554,24 @@ class TransportLayer:
         Args:
             application_data – payload size in bytes (≤ MAX_DATA_SIZE per segment)
         """
-        fragment_flag, data, self.remaining_data = self.fragmentation(application_data)
-            
-        checksum = self.compute_checksum(data)
-        segment_created = self.create_segment(SEG_DATA, self.sequence_number, fragment_flag, checksum, data)
-        self.backup_sent_data_segment = segment_created
-        self.send_segment_to_network_layer(segment_created)
-        print(f"{self.node_name}: Layer 4: Segment created by adding transport layer header " f"(DATA, seq={self.sequence_number}) (encapsulation)")
+        # fragment_flag, data, self.remaining_data = self.fragmentation(application_data)
+        fragment_flag, self.remaining_data = self.fragmentation(application_data)
+        while self.remaining_data:
+            checksum = self.compute_checksum(self.remaining_data[0])
+            segment_created = self.create_segment(SEG_DATA, self.sequence_number,
+                                                  fragment_flag, checksum, self.remaining_data[0])
+            self.send_segment_to_network_layer(segment_created)
+            if self.received_data:
+                if self.received_data[0].is_ack():
+                    self.received_data.pop(0)
+                    self.remaining_data.pop(0)
+                else:
+                    continue
+        # checksum = self.compute_checksum(data)
+        # segment_created = self.create_segment(SEG_DATA, self.sequence_number, fragment_flag, checksum, data)
+        # self.backup_sent_data_segment = segment_created
+        # self.send_segment_to_network_layer(segment_created)
+        # print(f"{self.node_name}: Layer 4: Segment created by adding transport layer header " f"(DATA, seq={self.sequence_number}) (encapsulation)")
         pass
 
     def fragmentation(self, data: int):
@@ -564,17 +584,27 @@ class TransportLayer:
         Args:
             data – total payload size in bytes
         """
+        # TODO: store the frag to self.remaining_data
         print(f"{self.node_name}: Layer 4: Data received from Application Layer. "
               f"Data size={data}")
         # TODO: split data into chunks <= MAX_DATA_SIZE, call _send_segment for each
         is_fragment = 1
         is_not_fragment = 0
-        if data > MAX_DATA_SIZE:
-            remaining = data - MAX_DATA_SIZE
-            return is_fragment, int(MAX_DATA_SIZE), remaining
-        else:
-            return is_not_fragment, data, None
-        pass
+        while data > 0:
+            if data > MAX_DATA_SIZE:
+                self.remaining_data.append(MAX_DATA_SIZE)
+                data -= MAX_DATA_SIZE
+            else:
+                self.remaining_data.append(data)
+                break
+        return is_fragment, self.remaining_data
+        # if data > MAX_DATA_SIZE:
+        #     remaining = data - MAX_DATA_SIZE
+        #     return is_fragment, int(MAX_DATA_SIZE), remaining
+        # TODO: not fragment should be checked in main
+        # else:
+        #     return is_not_fragment, data, None
+        # pass
 
     def compute_checksum(self, data: int) -> int:
         """Compute a simple checksum over the segment data.
@@ -678,12 +708,17 @@ class TransportLayer:
                     self.sequence_number = self.sequence_number + 1
                     if self.sequence_number > 1:
                         self.sequence_number = 0
-                    
+                    # TODO return directly
+                    self.received_data.append(segment)
+                    return
+
                     # send next segment if fragmentation still have reminding data
                     if self.remaining_data is not None: 
                         # data transmission
                         self.send_data_segment(self.remaining_data)
                     # if no reminding data do nothing
+                    else :
+                        return
                 else:
                     # if different, must be the last sent segment need to resend
                     self.send_segment_to_network_layer(self.backup_sent_data_segment)
