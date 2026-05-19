@@ -550,7 +550,7 @@ class TransportLayer:
         self.backup_sent_data_segment = None
         self.segment_type  = 0 
         self.sequence_number = 0   # alternating bit between 0 and 1
-        self.last_ack_sent = 0  # last ACK seq sent by receiver, init with 0
+        self.last_ack_sent = 1  # init opposite of first expected seq so a corrupt first DATA triggers retransmit
         self.expected_sequence_number = 0 
         self.network_layer : NetworkLayer | None = None  # injected after construction
 

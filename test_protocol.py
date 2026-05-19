@@ -402,8 +402,11 @@ class TestTransportLayer(unittest.TestCase):
     def test_initial_sequence_number_is_zero(self):
         self.assertEqual(self.tl.sequence_number, 0)
 
-    def test_initial_last_ack_sent_is_zero(self):
-        self.assertEqual(self.tl.last_ack_sent, 0)
+    def test_initial_last_ack_sent_is_opposite_of_first_expected_seq(self):
+        # rdt2.2: init last_ack_sent to the bit opposite the first expected seq
+        # so a corrupt first DATA causes the sender to see an ACK mismatch and
+        # retransmit, rather than silently advancing.
+        self.assertEqual(self.tl.last_ack_sent, 1)
 
     def test_initial_expected_sequence_number_is_zero(self):
         self.assertEqual(self.tl.expected_sequence_number, 0)
