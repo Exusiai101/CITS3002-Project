@@ -17,7 +17,7 @@ def _fmt_iface(label: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Layer 2 – Ethernet-like Frame
+# data link layer, frame
 # ---------------------------------------------------------------------------
 
 class Frame:
@@ -45,7 +45,7 @@ class Frame:
 
 
 # ---------------------------------------------------------------------------
-# Layer 3 – IP-like Packet
+# network layer packet
 # ---------------------------------------------------------------------------
 
 class Packet:
@@ -80,7 +80,7 @@ class Packet:
 
 
 # ---------------------------------------------------------------------------
-# Layer 4 – UDP-like Segment with rdt2.2 ACK support
+# transport layer segment
 # ---------------------------------------------------------------------------
 
 class Segment:
@@ -123,7 +123,7 @@ class Segment:
 
 
 # ---------------------------------------------------------------------------
-# Layer 2 – Data Link Layer
+# L2 data link layer
 # ---------------------------------------------------------------------------
 
 class DataLinkLayer:
@@ -151,23 +151,14 @@ class DataLinkLayer:
         
         # pass in when creating object, provide a view of connected node, linking ip and its corresponding object  
         self.network_neighbour = network_neighbour
+
     # ------------------------------------------------------------------
-    # Sending path (downward from Network Layer)
+    # sending path (downward from network layer)
     # ------------------------------------------------------------------
 
     # call this 
     def receive_packet_from_network_layer(self, packet: Packet, next_hop_ip: str, outgoing_interface: str):
-        """Accept a Packet from the Network Layer and transmit it as a Frame.
-
-        Steps:
-            1. Look up destination MAC for next_hop_ip.
-            2. Create a Frame wrapping the packet.
-            3. Send the frame onto the link.
-
-        Args:
-            packet      – the IP packet to encapsulate
-            next_hop_ip – next-hop IP address to resolve to a MAC
-        """
+        # take an packer from newtork layer 
         # this function will be call to passing in data
         # all we care at L2 is how to pass data from host to router
 
@@ -192,46 +183,17 @@ class DataLinkLayer:
         self.send_frame(frame, destination, interface, outgoing_interface)
 
     def mac_lookup(self, next_hop_ip: str) -> str:
-        """Return the MAC address for the given next-hop IP.
-
-        Looks up self.mac_table; raises KeyError if not found.
-
-        Args:
-            next_hop_ip – IP address to resolve
-
-        Returns:
-            MAC address string
-        """
+        # find the mac address with next hop dest ip
         # return the result after using next hop ip to find it mac address
         return self.mac_table[next_hop_ip]
 
     def create_frame(self, dest_mac: str, src_mac: str, packet: Packet) -> Frame:
-        """Wrap a Packet inside an Ethernet-like Frame.
-
-        Args:
-            dest_mac – destination MAC address
-            src_mac  – source MAC address (this interface)
-            packet   – payload to encapsulate
-
-        Returns:
-            A new Frame object
-        """
-        # return the create Frame data strcture
+        # create Frame data strcture
         return Frame(dest_mac, src_mac, packet)
 
     def send_frame(self, frame: Frame, destination: object, interface: str,
                    outgoing_interface: str = ""):
-        """Transmit a Frame to the next node's DataLinkLayer.
-
-        In this simulation 'sending' means calling destination.receive_frame().
-
-        Args:
-            frame              – the Frame to transmit
-            destination        – the receiving DataLinkLayer instance
-            interface          – label of the destination's incoming interface
-            outgoing_interface – label of this node's outgoing interface (used
-                                 by the router to log 'Frame forwarded on Interface X')
-        """
+    
         if outgoing_interface and outgoing_interface.startswith("interface_"):
             print(f"{self.node_name}: Layer 2: Frame forwarded on "
                   f"{_fmt_iface(outgoing_interface)}")
@@ -241,22 +203,13 @@ class DataLinkLayer:
         destination.receive_frame(frame, interface)
 
     # ------------------------------------------------------------------
-    # Receiving path (upward from the link / toward Network Layer)
+    # receiving path (received from the link and send toward network layer)
     # ------------------------------------------------------------------
     
     # call this one
     def receive_frame(self, frame: Frame, interface: str = ""):
-        """Process an incoming Frame.
+        # process an incoming Frame.
 
-        Steps:
-            1. Log receipt.
-            2. Learn the source MAC address.
-            3. Deliver the payload up to the Network Layer.
-
-        Args:
-            frame     – the received Frame
-            interface – label of the interface it arrived on (for routers)
-        """
         is_router_iface = interface.startswith("interface_") if interface else False
         print(f"{self.node_name}: Layer 2: Frame received"
               + (f" on {_fmt_iface(interface)}" if is_router_iface else ""))
@@ -273,12 +226,8 @@ class DataLinkLayer:
         self.send_up_to_network_layer(frame.payload)
 
     def mac_learning(self, src_mac: str, interface: str = ""):
-        """Record the source MAC → interface mapping in mac_table.
+        # record the source MAC and map it to interface in mac table.
 
-        Args:
-            src_mac   – source MAC address extracted from the received frame
-            interface – interface label (informational)
-        """
         is_router_iface = interface.startswith("interface_") if interface else False
         print(f"{self.node_name}: Layer 2: Source MAC learned: {src_mac}"
               + (f" on {_fmt_iface(interface)}" if is_router_iface else ""))
@@ -287,11 +236,7 @@ class DataLinkLayer:
         self.interface_table[src_mac] = interface
 
     def send_up_to_network_layer(self, packet: Packet):
-        """Deliver the decapsulated Packet to the Network Layer.
-
-        Args:
-            packet – the IP packet extracted from the frame payload
-        """
+    
         print(f"{self.node_name}: Layer 2: Packet delivered to Network Layer")
 
         # by passing the payload from the frame, passing the informatin up to L3
@@ -299,7 +244,7 @@ class DataLinkLayer:
 
 
 # ---------------------------------------------------------------------------
-# Layer 3 – Network Layer
+# L3 – network layer
 # ---------------------------------------------------------------------------
 
 class NetworkLayer:
@@ -329,7 +274,7 @@ class NetworkLayer:
         self.transport_layer : TransportLayer | None = None  # injected after construction
 
     # ------------------------------------------------------------------
-    # Sending path (downward from Transport Layer)
+    # sending path (downward from Transport Layer)
     # ------------------------------------------------------------------
 
     def receive_segment_from_transport_layer(self, segment: Segment,
@@ -512,29 +457,10 @@ class NetworkLayer:
 
 
 # ---------------------------------------------------------------------------
-# Layer 4 – Transport Layer  (rdt2.2 – Alternating Bit Protocol)
+# L4 – tansport layer 
 # ---------------------------------------------------------------------------
 
 class TransportLayer:
-    """Handles segmentation, checksums, port-based delivery, and rdt2.2.
-
-    rdt2.2 (Alternating Bit Protocol):
-        - Sender alternates sequence numbers 0 → 1 → 0 → …
-        - Sender waits for ACK with the correct sequence number before advancing.
-        - On wrong/corrupt ACK the sender retransmits the current segment.
-        - Receiver sends ACK matching the received sequence number.
-        - On corrupt or duplicate segment the receiver resends the last ACK.
-
-    Attributes:
-        node_name      – label for logging
-        src_port       – source port number
-        dest_port      – destination port number
-        src_ip         – this host's IP (used when building packets)
-        dest_ip        – peer host's IP
-        seq_num        – current sender sequence number (0 or 1)
-        last_ack_sent  – last ACK sequence number sent (receiver side)
-        network_layer  – reference to the NetworkLayer below
-    """
 
     def __init__(self, node_name: str, src_port: int, dest_port: int,
                  src_ip: str, dest_ip: str):
@@ -556,18 +482,11 @@ class TransportLayer:
 
     
     # ------------------------------------------------------------------
-    # Sending path (downward from Application Layer)
+    # sending path (from application layer to network layer)
     # ------------------------------------------------------------------
 
     def send_data_segment(self, application_data: int):
-        """Reliably send one data chunk using rdt2.2.
-
-        Creates a DATA segment, computes its checksum, sends it down, then
-        waits for the correct ACK.  Retransmits on wrong or corrupt ACK.
-
-        Args:
-            application_data – payload size in bytes (≤ MAX_DATA_SIZE per segment)
-        """
+        
         fragment_flag, self.remaining_data = self.fragmentation(application_data)
         while self.remaining_data:
             chunk = self.remaining_data[0]
@@ -586,15 +505,7 @@ class TransportLayer:
                 self.remaining_data.pop(0)
 
     def fragmentation(self, data: int):
-        """Segment application data and reliably send each segment via rdt2.2.
-
-        If len(data) > MAX_DATA_SIZE the message is split into chunks of at
-        most MAX_DATA_SIZE bytes.  Each chunk is sent sequentially; the next
-        chunk is only sent after the current ACK is received.
-
-        Args:
-            data – total payload size in bytes
-        """
+        # seperate the application data into max contain size
         print(f"{self.node_name}: Layer 4: Data received from Application Layer. "
               f"Data size={data}")
         is_fragment = 1
@@ -608,62 +519,27 @@ class TransportLayer:
         return is_fragment, self.remaining_data
 
     def compute_checksum(self, data: int) -> int:
-        """Compute a simple checksum over the segment data.
-
-        Args:
-            data – payload size in bytes
-
-        Returns:
-            Integer checksum value (0–65535)
-        """
+        # calculate the check sum
         return (31 * data) % 65536
 
     def create_segment(self, segment_type :int, sequence_number: int, fragment_flag: int, 
                        checksum: int, data: int = 0) -> Segment:
-        """Build a Segment with the given parameters.
-
-        Args:
-            seg_type  – SEG_DATA or SEG_ACK
-            seq_num   – sequence number (0 or 1)
-            data      – payload size in bytes (0 for ACK)
-            checksum  – pre-computed checksum value
-
-        Returns:
-            A new Segment object
-        """
-
+        
+        # make a segment
         return Segment(self.src_port, self.dest_port, fragment_flag,
                        segment_type, sequence_number, data, checksum)
 
     def send_segment_to_network_layer(self, segment: Segment):
-        """Pass a Segment down to the Network Layer for transmission.
-
-        Args:
-            segment – the segment to send
-        """
+        # pass by make network layer receving being called
         print(f"{self.node_name}: Layer 4: Segment sent to Network Layer")
         self.network_layer.receive_segment_from_transport_layer(segment, self.src_ip, self.dest_ip)
 
     # ------------------------------------------------------------------
-    # Receiving path (upward from Network Layer)
+    # receiving path (going upward from network layer)
     # ------------------------------------------------------------------
 
     def receive_segment_from_network_layer(self, segment: Segment):
-        """Handle an incoming Segment from the Network Layer.
-
-        DATA segment:
-            1. Verify checksum; discard on failure and resend last ACK.
-            2. Check sequence number; discard duplicates and resend last ACK.
-            3. Deliver data to application layer.
-            4. Send ACK with the same sequence number.
-
-        ACK segment (sender side):
-            1. Verify checksum.
-            2. Check if ACK matches the current expected sequence number.
-
-        Args:
-            segment – the received segment
-        """
+        
         print(f"{self.node_name}: Layer 4: Segment received from Network Layer")
         # work depending on segmnet.type
 
@@ -709,25 +585,14 @@ class TransportLayer:
                 self.send_segment_to_network_layer(self.backup_sent_data_segment)
 
     def verify_checksum(self, segment: Segment) -> bool:
-        """Verify the checksum of a received segment.
-
-        Args:
-            segment – the segment to verify
-
-        Returns:
-            True if checksum is valid, False otherwise
-        """
+        # check checksum
         print(f"{self.node_name}: Layer 4: Checksum verified")
         if segment.checksum == self.compute_checksum(segment.data):
             return True
         return False
 
     def _send_ack_segment(self, sequence_number: int):
-        """Create and send an ACK segment for the given sequence number.
-
-        Args:
-            seq_num – sequence number to acknowledge
-        """
+        # acknowledge a correct segment
         fragment_flag = 0
         checksum = self.compute_checksum(0)
         segment = self.create_segment(SEG_ACK, sequence_number, fragment_flag, checksum, 0)
@@ -738,10 +603,6 @@ class TransportLayer:
         self.last_ack_sent = segment.sequence_number
 
     def deliver_to_application(self, data: int):
-        """Deliver received data to the application layer (print / return).
-
-        Args:
-            data – the application message payload
-        """
+        # just print to show arrived 
         print(f"{self.node_name}: Layer 4: DATA segment delivered to Application Layer. "
               f"Data size={data}")

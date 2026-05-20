@@ -34,12 +34,12 @@ class Host:
         self.network_layer.transport_layer = self.transport_layer
 
     def send(self, data_size: int):
-        """Trigger sending data_size bytes from this host's Transport Layer."""
+        # sending data_size bytes from this host's transport layer.
         self.transport_layer.send_data_segment(data_size)
 
 
 class Router:
-    """Represents a router with two interfaces, each with its own Data Link Layer."""
+    # router with two interfaces, each with its own data link layer.
 
     def __init__(self, router_name: str):
         # Neighbour dicts stored as instance vars so connect_hosts() can populate
@@ -75,31 +75,14 @@ class Router:
         self.data_link_layer_interface_2.network_layer = self.network_layer
 
     def connect_hosts(self, host_a_dl: DataLinkLayer, host_b_dl: DataLinkLayer):
-        """Wire host DataLinkLayers into the router's neighbour dicts.
-
-        Must be called after both Host objects are constructed because each Host's
-        DataLinkLayer can only exist after the Host is built.
-
-        Args:
-            host_a_dl – DataLinkLayer of Host A (connects to interface_1)
-            host_b_dl – DataLinkLayer of Host B (connects to interface_2)
-        """
+        
+        # connecting the router interface with a host
         self.router_if1_neighbours["interface_1"] = (host_a_dl, "eth0")
         self.router_if2_neighbours["interface_2"] = (host_b_dl, "eth0")
 
 
 def init_network() -> tuple[Host, Host, Router]:
-    """Construct and wire the full Host A → Router R1 → Host B topology.
-
-    The circular dependency (hosts need router's DataLinkLayers; router needs
-    hosts' DataLinkLayers) is broken by:
-        1. Creating Router first — its DataLinkLayers start with empty neighbour dicts.
-        2. Creating Hosts, passing the router's DataLinkLayers.
-        3. Calling router.connect_hosts() to fill in the missing back-links.
-
-    Returns:
-        (host_a, host_b, router) — fully wired and ready for simulation.
-    """
+    # encapsulates the construction of devices and handle the connection
     router = Router("Router R1")
 
     host_a_obj = Host(
