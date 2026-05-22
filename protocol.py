@@ -1,7 +1,6 @@
-# protocol.py
-# Contains header definitions (Frame, Packet, Segment) and layer class skeletons
-# for Layer 2 (Data Link), Layer 3 (Network), and Layer 4 (Transport).
+# Layer 2 (Data Link), Layer 3 (Network), and Layer 4 (Transport).
 
+# Magic number definition
 TYPE_IPV4 = 0x0800   # Ethernet type field value for IPv4
 PROTO_UDP = 17       # IP protocol field value for UDP-like payload
 SEG_DATA  = 0        # Transport segment type: DATA
@@ -21,9 +20,7 @@ def _fmt_iface(label: str) -> str:
 # ---------------------------------------------------------------------------
 
 class Frame:
-    """Data Link layer PDU.
-
-    Fields (mirrors Ethernet header):
+    """
         dest_mac  – 6-byte destination MAC, e.g. 'BB:BB:BB:BB:BB:BB'
         src_mac   – 6-byte source MAC
         type      – 2-byte EtherType; 0x0800 = IPv4
@@ -49,9 +46,7 @@ class Frame:
 # ---------------------------------------------------------------------------
 
 class Packet:
-    """Network layer PDU.
-
-    Fields (mirrors IPv4 header subset):
+    """
         src_ip       – source IP string, e.g. '10.0.1.10'
         dest_ip      – destination IP string
         ttl          – time-to-live (decremented at each router; drop when 0)
@@ -84,9 +79,7 @@ class Packet:
 # ---------------------------------------------------------------------------
 
 class Segment:
-    """Transport layer PDU.
-
-    Fields:
+    """
         src_port        – source port number (2 bytes)
         dest_port       – destination port number (2 bytes)
         length          – total segment length in bytes (header + data)
@@ -127,15 +120,11 @@ class Segment:
 # ---------------------------------------------------------------------------
 
 class DataLinkLayer:
-    """Handles framing, MAC addressing, learning, and local frame delivery.
-
-    Each node (host or router interface) owns one DataLinkLayer instance.
-
-    Attributes:
-        node_name   – human-readable label used in log output (e.g. 'Host A')
+    """
+        node_name   
         mac_address – this interface's own MAC address
-        mac_table   – dict mapping next-hop IP → MAC address (ARP-like cache)
-        network_layer – reference to the NetworkLayer above (set after init)
+        mac_table   – dict mapping next-hop IP → MAC address
+        network_layer – reference to this node's network layer
     """
 
     def __init__(self, node_name: str, mac_address: str, mac_table: dict[str, str], network_neighbour: dict[str, tuple["DataLinkLayer", str]] ):
@@ -191,7 +180,7 @@ class DataLinkLayer:
         # create Frame data strcture
         return Frame(dest_mac, src_mac, packet)
 
-    def send_frame(self, frame: Frame, destination: object, interface: str,
+    def send_frame(self, frame: Frame, destination: DataLinkLayer, interface: str,
                    outgoing_interface: str = ""):
     
         if outgoing_interface and outgoing_interface.startswith("interface_"):
@@ -248,11 +237,7 @@ class DataLinkLayer:
 # ---------------------------------------------------------------------------
 
 class NetworkLayer:
-    """Handles IP addressing, routing, TTL management, and packet forwarding.
-
-    Each node owns one NetworkLayer instance.
-
-    Attributes:
+    """
         node_name      – label for logging
         ip_addresses   – list of IP addresses assigned to this node's interfaces
         routing_table  – list of route dicts:
@@ -260,7 +245,7 @@ class NetworkLayer:
                             'interface': 'eth1',
                             'next_hop': '10.0.2.20'}
         data_link_layers – dict mapping interface label → DataLinkLayer instance
-        transport_layer  – reference to the TransportLayer above (hosts only)
+        transport_layer  – reference to the TransportLayer
     """
 
     DEFAULT_TTL = 4
@@ -295,10 +280,14 @@ class NetworkLayer:
         print(f"{self.node_name}: Layer 3: Segment received from Transport Layer: "
               f"SRC_IP={src_ip}, DST_IP={dest_ip}, TTL={new_packet.ttl}")
         print(f"{self.node_name}: Layer 3: Destination IP read: {dest_ip}")
+
+
         table = self.routing_table_lookup(dest_ip)
         next_hop = table["next_hop"] if table["next_hop"] is not None else dest_ip
         print(f"{self.node_name}: Layer 3: Next-hop IP determined: {next_hop}")
         # Hosts log without interface name; routers append the formatted label.
+
+
         if self.node_name == "Router R1":
             print(f"{self.node_name}: Layer 3: Outgoing interface selected "
                   f"({_fmt_iface(table['interface'])})")
@@ -308,16 +297,13 @@ class NetworkLayer:
 
     def create_packet(self, src_ip: str, dest_ip: str, segment: Segment,
                       ttl: int = None) -> Packet:
-        """Build an IP Packet encapsulating the given Segment.
+        """Build a Packet encapsulating the given Segment.
 
         Args:
             src_ip  – source IP address
             dest_ip – destination IP address
             segment – payload segment
             ttl     – time-to-live (defaults to DEFAULT_TTL)
-
-        Returns:
-            A new Packet object
         """
         return Packet(src_ip, dest_ip, ttl or self.DEFAULT_TTL, segment)
 
@@ -394,8 +380,6 @@ class NetworkLayer:
         For hosts: if dest_ip matches a local IP, deliver to Transport Layer.
         For routers: decrement TTL then re-route (forward_packet).
 
-        Args:
-            packet – the received IP packet
         """
         print(f"{self.node_name}: Layer 3: Packet received from Data Link Layer: "
               f"SRC_IP={packet.src_ip}, DST_IP={packet.dest_ip}, TTL={packet.ttl}")
@@ -416,9 +400,6 @@ class NetworkLayer:
             1. Decrement TTL; drop and log if TTL reaches 0.
             2. Perform routing table lookup.
             3. Send down to the selected Data Link Layer.
-
-        Args:
-            packet – the IP packet to forward
         """
         if packet.ttl <= 0:
             return
@@ -437,10 +418,8 @@ class NetworkLayer:
 
         Args:
             dest_ip – destination IP to check
-
-        Returns:
-            bool
         """
+
         for ip in self.ip_addresses:
             if ip == dest_ip:
                 return True
