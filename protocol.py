@@ -21,10 +21,10 @@ def _fmt_iface(label: str) -> str:
 
 class Frame:
     """
-        dest_mac  – 6-byte destination MAC, e.g. 'BB:BB:BB:BB:BB:BB'
-        src_mac   – 6-byte source MAC
-        type      – 2-byte EtherType; 0x0800 = IPv4
-        payload   – encapsulated Packet object
+        dest_mac  - 6-byte destination MAC, e.g. 'BB:BB:BB:BB:BB:BB'
+        src_mac   - 6-byte source MAC
+        type      - 2-byte EtherType; 0x0800 = IPv4
+        payload   - encapsulated Packet object
     """
 
     def __init__(self, dest_mac: str, src_mac: str, payload, etype: int = TYPE_IPV4):
@@ -47,12 +47,12 @@ class Frame:
 
 class Packet:
     """
-        src_ip       – source IP string, e.g. '10.0.1.10'
-        dest_ip      – destination IP string
-        ttl          – time-to-live (decremented at each router; drop when 0)
-        protocol     – 1 byte; 17 = UDP-like payload
-        total_length – header + payload size in bytes
-        payload      – encapsulated Segment object
+        src_ip       - source IP string, e.g. '10.0.1.10'
+        dest_ip      - destination IP string
+        ttl          - time-to-live (decremented at each router; drop when 0)
+        protocol     - 1 byte; 17 = UDP-like payload
+        total_length - header + payload size in bytes
+        payload      - encapsulated Segment object
     """
 
     HEADER_SIZE = 20  # fixed header overhead in bytes (simplified)
@@ -80,13 +80,13 @@ class Packet:
 
 class Segment:
     """
-        src_port        – source port number (2 bytes)
-        dest_port       – destination port number (2 bytes)
-        length          – total segment length in bytes (header + data)
-        checksum        – computed checksum for error detection (2 bytes)
-        type            – SEG_DATA (0) or SEG_ACK (1)
-        sequence_number – alternating bit: 0 or 1
-        data            – payload size in bytes (0 for ACK)
+        src_port        - source port number (2 bytes)
+        dest_port       - destination port number (2 bytes)
+        length          - total segment length in bytes (header + data)
+        checksum        - computed checksum for error detection (2 bytes)
+        type            - SEG_DATA (0) or SEG_ACK (1)
+        sequence_number - alternating bit: 0 or 1
+        data            - payload size in bytes (0 for ACK)
     """
 
     HEADER_SIZE = 10  # fixed header overhead: src_port+dest_port+len+cksum+type+seq
@@ -121,13 +121,15 @@ class Segment:
 
 class DataLinkLayer:
     """
-        node_name   
-        mac_address – this interface's own MAC address
-        mac_table   – dict mapping next-hop IP → MAC address
-        network_layer – reference to this node's network layer
+        node_name   - Node name
+        mac_address - this interface's own MAC address
+        mac_table   - dict mapping next-hop IP → MAC address
+        network_layer - reference to this node's network layer
     """
 
-    def __init__(self, node_name: str, mac_address: str, mac_table: dict[str, str], network_neighbour: dict[str, tuple["DataLinkLayer", str]] ):
+    def __init__(self, node_name: str, mac_address: str, 
+                 mac_table: dict[str, str], 
+                 network_neighbour: dict[str, tuple["DataLinkLayer", str]] ):
         self.node_name     = node_name
         self.mac_address   = mac_address
         
@@ -140,10 +142,6 @@ class DataLinkLayer:
         
         # pass in when creating object, provide a view of connected node, linking ip and its corresponding object  
         self.network_neighbour = network_neighbour
-
-    # ------------------------------------------------------------------
-    # sending path (downward from network layer)
-    # ------------------------------------------------------------------
 
     # call this 
     def receive_packet_from_network_layer(self, packet: Packet, next_hop_ip: str, outgoing_interface: str):
@@ -191,9 +189,6 @@ class DataLinkLayer:
         # by passing in the dest (router) object, making the dest (router) object to call received, making passing possible
         destination.receive_frame(frame, interface)
 
-    # ------------------------------------------------------------------
-    # receiving path (received from the link and send toward network layer)
-    # ------------------------------------------------------------------
     
     # call this one
     def receive_frame(self, frame: Frame, interface: str = ""):
@@ -238,14 +233,14 @@ class DataLinkLayer:
 
 class NetworkLayer:
     """
-        node_name      – label for logging
-        ip_addresses   – list of IP addresses assigned to this node's interfaces
-        routing_table  – list of route dicts:
+        node_name      - label for logging
+        ip_addresses   - list of IP addresses assigned to this node's interfaces
+        routing_table  - list of route dicts:
                            {'network': '10.0.2.0/24',
                             'interface': 'eth1',
                             'next_hop': '10.0.2.20'}
-        data_link_layers – dict mapping interface label → DataLinkLayer instance
-        transport_layer  – reference to the TransportLayer
+        data_link_layers - dict mapping interface label → DataLinkLayer instance
+        transport_layer  - reference to the TransportLayer
     """
 
     DEFAULT_TTL = 4
@@ -258,10 +253,7 @@ class NetworkLayer:
         self.data_link_layers: dict[str, DataLinkLayer] = {}
         self.transport_layer : TransportLayer | None = None  # injected after construction
 
-    # ------------------------------------------------------------------
-    # sending path (downward from Transport Layer)
-    # ------------------------------------------------------------------
-
+    # call this
     def receive_segment_from_transport_layer(self, segment: Segment,
                                               src_ip: str, dest_ip: str):
         """Accept a Segment from the Transport Layer and forward it as a Packet.
@@ -300,25 +292,25 @@ class NetworkLayer:
         """Build a Packet encapsulating the given Segment.
 
         Args:
-            src_ip  – source IP address
-            dest_ip – destination IP address
-            segment – payload segment
-            ttl     – time-to-live (defaults to DEFAULT_TTL)
+            src_ip  - source IP address
+            dest_ip - destination IP address
+            segment - payload segment
+            ttl     - time-to-live (defaults to DEFAULT_TTL)
         """
         return Packet(src_ip, dest_ip, ttl or self.DEFAULT_TTL, segment)
 
     def routing_table_lookup(self, dest_ip: str) -> dict:
-        """Find the best route for dest_ip in self.routing_table.
+        """
+        Find the best route for dest_ip in self.routing_table.
 
         Performs longest-prefix match. Returns the matching route dict
         containing 'interface' and 'next_hop' keys.
 
         Args:
-            dest_ip – destination IP address string
+            dest_ip - destination IP address string
 
         Returns:
-            Route dict, e.g. {'network': '10.0.2.0/24',
-                               'interface': 'eth1', 'next_hop': '10.0.2.20'}
+            Route dict
 
         Raises:
             ValueError if no matching route is found.
@@ -363,17 +355,14 @@ class NetworkLayer:
         """Hand the Packet to the appropriate Data Link Layer for transmission.
 
         Args:
-            packet      – the IP packet to send
-            interface   – outgoing interface label
-            next_hop_ip – next-hop IP address for MAC resolution
+            packet      - the IP packet to send
+            interface   - outgoing interface label
+            next_hop_ip - next-hop IP address for MAC resolution
         """
         print(f"{self.node_name}: Layer 3: Packet forwarded to Data Link Layer")
         self.data_link_layers[interface].receive_packet_from_network_layer(packet, next_hop_ip, interface)
 
-    # ------------------------------------------------------------------
-    # Receiving / forwarding path (upward from Data Link Layer)
-    # ------------------------------------------------------------------
-
+    # Call this
     def receive_packet_from_data_link_layer(self, packet: Packet):
         """Process a Packet arriving from the Data Link Layer.
 
@@ -417,7 +406,7 @@ class NetworkLayer:
         """Return True if dest_ip belongs to one of this node's interfaces.
 
         Args:
-            dest_ip – destination IP to check
+            dest_ip - destination IP to check
         """
 
         for ip in self.ip_addresses:
@@ -429,7 +418,7 @@ class NetworkLayer:
         """Deliver the decapsulated Segment to the Transport Layer.
 
         Args:
-            segment – the transport segment extracted from the packet payload
+            segment - the transport segment extracted from the packet payload
         """
         print(f"{self.node_name}: Layer 3: Segment delivered to Transport Layer")
         self.transport_layer.receive_segment_from_network_layer(segment)
@@ -460,10 +449,7 @@ class TransportLayer:
         self.network_layer : NetworkLayer | None = None  # injected after construction
 
     
-    # ------------------------------------------------------------------
-    # sending path (from application layer to network layer)
-    # ------------------------------------------------------------------
-
+    # call this
     def send_data_segment(self, application_data: int):
         
         fragment_flag, self.remaining_data = self.fragmentation(application_data)
@@ -513,10 +499,7 @@ class TransportLayer:
         print(f"{self.node_name}: Layer 4: Segment sent to Network Layer")
         self.network_layer.receive_segment_from_transport_layer(segment, self.src_ip, self.dest_ip)
 
-    # ------------------------------------------------------------------
-    # receiving path (going upward from network layer)
-    # ------------------------------------------------------------------
-
+    # call this
     def receive_segment_from_network_layer(self, segment: Segment):
         
         print(f"{self.node_name}: Layer 4: Segment received from Network Layer")

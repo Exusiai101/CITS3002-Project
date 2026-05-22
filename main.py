@@ -5,8 +5,8 @@ from devices import init_network
 if __name__ == "__main__":
 
     if len(sys.argv) == 1:
-        print("No arguments provided. It will be set to 500 bytes.")
-        data_size = 500
+        print("No arguments provided. It will be set to 1200 bytes.")
+        data_size = 1200
     elif len(sys.argv) != 2 or sys.argv[1] == "--help" or (not sys.argv[1].isdigit()):
         print("Usage: python main.py <data_size_in_bytes>")
         sys.exit(1)
